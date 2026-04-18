@@ -1,5 +1,6 @@
 import Graph from "graphology";
 import type { GraphData, NodeRow } from "./loader";
+import { applyHexLayout } from "./layout";
 
 export interface BuildResult {
   graph: Graph;
@@ -37,6 +38,8 @@ export function buildGraph(data: GraphData): BuildResult {
       weight: e.weight,
     });
   }
+
+  applyHexLayout(graph);
 
   return { graph, binIds, genomeIds };
 }
