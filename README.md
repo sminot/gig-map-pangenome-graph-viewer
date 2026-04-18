@@ -112,7 +112,7 @@ Open the printed localhost URL.
 npm run build
 ```
 
-Output lands in `viewer/dist/`, including the bundled Arrow files. Any static host works (GitHub Pages, Netlify, S3, …). The included workflow at `.github/workflows/pages.yml` builds and deploys to GitHub Pages on push to `main`.
+Output lands in `viewer/dist/`, including the bundled Arrow files. Any static host works (GitHub Pages, Netlify, S3, …). The included workflow at `.github/workflows/pages.yml` builds on every push to `main` and publishes `viewer/dist/` to the `gh-pages` branch (force-orphaned, one commit per deploy). One-time setup: in the repo's **Settings → Pages**, set **Source** to *Deploy from a branch* and pick `gh-pages` / `/ (root)`.
 
 ## How to point the viewer at your own gig-map run
 
@@ -250,7 +250,9 @@ viewer/src/
 2. Regenerates `demo-data/` via the scripted generator
 3. Runs `python -m preprocess.cli demo-data --out viewer/public/graph`
 4. Builds the viewer with `npm ci && npm run build`
-5. Publishes `viewer/dist/` to GitHub Pages
+5. Force-pushes `viewer/dist/` to the `gh-pages` branch (orphan, single commit per deploy)
+
+**One-time repo setup:** in **Settings → Pages**, set **Source** = *Deploy from a branch*, **Branch** = `gh-pages`, **Folder** = `/ (root)`. GitHub Pages then serves the most recent deploy from that branch. The first deploy creates the branch automatically.
 
 To deploy elsewhere, point any static host at the `viewer/dist/` output after `npm run build`.
 
