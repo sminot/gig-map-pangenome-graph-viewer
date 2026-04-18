@@ -1,4 +1,4 @@
-// Capture README screenshots against the built viewer/dist bundle.
+// Capture the README overview screenshot against the built viewer/dist bundle.
 //
 // Usage:
 //   npm run build --prefix viewer
@@ -85,25 +85,6 @@ async function waitForLoad(page) {
   await new Promise((r) => setTimeout(r, 800));
 }
 
-async function dragLasso(page, start, end, holdShift) {
-  await page.keyboard.down("Shift");
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  const steps = 30;
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    const theta = t * Math.PI * 2;
-    const cx = (start.x + end.x) / 2;
-    const cy = (start.y + end.y) / 2;
-    const rx = Math.abs(end.x - start.x) / 2;
-    const ry = Math.abs(end.y - start.y) / 2;
-    await page.mouse.move(cx + rx * Math.cos(theta), cy + ry * Math.sin(theta));
-  }
-  await page.mouse.up();
-  if (holdShift) await page.keyboard.up("Shift");
-  else await page.keyboard.up("Shift");
-}
-
 async function main() {
   const { server, url } = await startServer();
   const browser = await puppeteer.launch({
@@ -131,68 +112,17 @@ async function main() {
     });
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 2 });
 
-    // 1. Overview (default demo, default coloring)
+    // Overview — default demo, partition-colored bins so the core/shell/cloud
+    // radial structure of the radial-spectral layout reads at a glance.
     await page.goto(url, { waitUntil: "networkidle0" });
     await waitForLoad(page);
-    await page.screenshot({
-      path: join(OUT_DIR, "01-overview.png"),
-      fullPage: false,
-    });
-
-    // 2. Categorical coloring: bins by partition, genomes by clade
     await page.select("#bin-color", "partition");
     await page.select("#bin-palette", "category");
     await page.select("#genome-color", "clade");
     await new Promise((r) => setTimeout(r, 400));
     await page.screenshot({
-      path: join(OUT_DIR, "02-color-by-partition.png"),
-    });
-
-    // 3. Lasso-filter: keep only a subregion
-    const container = await page.$("#sigma-container");
-    const box = await container.boundingBox();
-    const start = { x: box.x + box.width * 0.35, y: box.y + box.height * 0.3 };
-    const end = { x: box.x + box.width * 0.75, y: box.y + box.height * 0.75 };
-    await dragLasso(page, start, end);
-    await new Promise((r) => setTimeout(r, 300));
-    // Take a shot while selection actions are visible, before clicking
-    await page.screenshot({
-      path: join(OUT_DIR, "03-lasso-selection.png"),
-    });
-    // Apply "Keep only"
-    await page.click("#selection-keep");
-    await new Promise((r) => setTimeout(r, 400));
-    await page.screenshot({
-      path: join(OUT_DIR, "04-filter-applied.png"),
-    });
-
-    // 4. Search highlight (on the filtered view)
-    await page.click("#filter-clear");
-    await new Promise((r) => setTimeout(r, 300));
-    await page.type("#search-input", "bin_002");
-    await new Promise((r) => setTimeout(r, 400));
-    await page.screenshot({
-      path: join(OUT_DIR, "05-search.png"),
-    });
-
-    // 5. Bin size scale (log) with the size legend visible
-    await page.evaluate(() => {
-      const el = document.getElementById("search-input");
-      if (el) {
-        el.value = "";
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    });
-    await page.select("#bin-size-scale", "log");
-    await new Promise((r) => setTimeout(r, 300));
-    // Scroll the sidebar so the legend (including the size legend) is in view.
-    await page.evaluate(() => {
-      const c = document.getElementById("controls");
-      if (c) c.scrollTop = c.scrollHeight;
-    });
-    await new Promise((r) => setTimeout(r, 200));
-    await page.screenshot({
-      path: join(OUT_DIR, "06-size-legend.png"),
+      path: join(OUT_DIR, "overview.png"),
+      fullPage: false,
     });
   } finally {
     await browser.close();
