@@ -15,9 +15,9 @@ A static website that visualizes a [gig-map](https://github.com/FredHutch/gig-ma
 - **Genome nodes** (unfilled rings) — input genomes; colored by user-supplied metadata (taxonomy / clade / etc.).
 - **Edges** — a genome contains that bin (from `prop_genes_detected` in gig-map output).
 
-Positions are precomputed by a **radial-spectral** layout: bins sit on concentric shells by prevalence (core at center, cloud on the outer bin-ring), genomes ride in an outer band, and angular position comes from the Fiedler vector of the weighted bipartite Laplacian — so bins that co-occur and genomes with similar content end up in the same angular wedge. Hover for details; click and drag a node to watch neighbors respond with force-directed physics.
+Positions are precomputed by a **co-embed** layout: TF-IDF weighting on the genome × bin matrix, truncated SVD into a shared latent space, then t-SNE to 2D. Genomes with similar bin content cluster together, clade-specific shell bins co-locate with their clade, and ubiquitous core bins pool in the middle — you can see similarity groups as real 2D clusters instead of a hairball or a radial gradient. Hover for details; click and drag a node to watch neighbors respond with force-directed physics.
 
-![Overview — bins colored by `partition` (core / shell / cloud), genomes by `clade`](docs/screenshots/overview.png)
+![Overview — bins colored by `partition` (core / shell / cloud), genomes by `clade`; five clades form five visibly separated clusters](docs/screenshots/overview.png)
 
 ## Features
 
@@ -159,7 +159,7 @@ If you'd rather not host the Arrow files anywhere, drop them directly onto the v
 
 ## Tech stack
 
-- **Python** — `pandas`, `numpy` + `scipy` (radial-spectral layout), `python-igraph` (fallback layouts), `pyarrow`
+- **Python** — `pandas`, `numpy` + `scipy` + `scikit-learn` (SVD + t-SNE co-embed layout), `python-igraph` (fallback layouts), `pyarrow`
 - **Viewer** — `sigma` v3 (WebGL), `graphology`, `graphology-layout-forceatlas2`, `apache-arrow`
 - **Build** — Vite + TypeScript (strict mode)
 
@@ -213,7 +213,7 @@ preprocess/preprocess/
   cli.py        # argparse entrypoint
   read.py       # fixed relative-path CSV reader; fails fast on missing files
   build.py      # bipartite bin<->genome graph + attribute derivation
-  layout.py     # radial-spectral layout (default) + python-igraph fallbacks; normalized to [-1, 1]
+  layout.py     # co-embed layout (default: SVD + t-SNE on TF-IDF bipartite matrix); radial-spectral + python-igraph fallbacks; normalized to [-1, 1]
   write.py      # three Apache Arrow IPC files (nodes/edges/meta)
 
 viewer/src/

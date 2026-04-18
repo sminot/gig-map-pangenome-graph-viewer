@@ -12,24 +12,156 @@ from .build import Graph
 
 
 def compute_layout(
-    graph: Graph, algorithm: str = "radial-spectral", seed: int = 1
+    graph: Graph, algorithm: str = "co-embed", seed: int = 1
 ) -> pd.DataFrame:
     """Compute x/y positions for every node in `graph`.
 
-    Default: ``radial-spectral`` — a structure-aware layout for bipartite
-    pangenome graphs that encodes prevalence radially (core bins at the
-    center, rare bins on an outer bin-ring, genomes in an outer genome-band)
-    and co-occurrence angularly (via the Fiedler vector of the weighted
-    normalized Laplacian). This avoids the "hairball" that a generic
-    force-directed layout produces on high-hub bipartite graphs.
+    Default: ``co-embed`` — truncated SVD of a TF-IDF-weighted
+    genome×bin presence matrix, followed by a t-SNE projection to 2D of
+    the joint (genome + bin) embedding. Genomes that share accessory
+    content cluster visibly; bins land near the genomes that carry them
+    (core bins near the middle since they belong to everyone, shell bins
+    with their clade, cloud bins scattered). The output is roughly
+    uniformly filling a 2D square, which is what you want when the goal
+    is to see similarity groups rather than radial / hierarchical
+    structure.
 
-    Other algorithms (``drl``, ``fr``, ``kk``) fall through to python-igraph.
-    Positions are normalized to the unit square [-1, 1].
+    Other algorithms (``radial-spectral``, ``drl``, ``fr``, ``kk``) are
+    preserved for comparison. Positions are normalized to [-1, 1].
     Returns a DataFrame with columns: id, x, y.
     """
+    if algorithm == "co-embed":
+        return _co_embed_tsne_layout(graph, seed=seed)
     if algorithm == "radial-spectral":
         return _radial_spectral_layout(graph, seed=seed)
     return _igraph_layout(graph, algorithm=algorithm, seed=seed)
+
+
+def _co_embed_tsne_layout(graph: Graph, seed: int) -> pd.DataFrame:
+    """Joint SVD + t-SNE embedding of genomes and bins in the same 2D plane.
+
+    Pipeline
+    --------
+    1. Build the bipartite genome × bin presence / weight matrix M
+       (rows = genomes, cols = bins, values = edge weight, i.e.
+       prop_genes_detected).
+    2. TF-IDF normalize over bins. Inverse-document-frequency makes rare
+       shell bins the drivers of similarity; without it, ubiquitous core
+       bins dominate every genome's signature and everything looks alike.
+    3. Truncated SVD of the centered matrix gives a shared k-dim latent
+       space for genomes (U · Σ) *and* bins (V · Σ). They live in the
+       same coordinate system.
+    4. t-SNE reduces that joint latent space to 2D, producing well-
+       separated clusters uniformly spread across the plane.
+    5. Fall back to the first two SVD components if t-SNE is unavailable
+       (e.g. scikit-learn not installed) or the graph is too small for
+       t-SNE to be meaningful.
+    """
+    try:
+        from sklearn.manifold import TSNE  # type: ignore
+
+        _HAS_TSNE = True
+    except Exception:
+        _HAS_TSNE = False
+
+    nodes = graph.nodes
+    edges = graph.edges
+    n = len(nodes)
+    if n == 0:
+        return pd.DataFrame({"id": [], "x": [], "y": []})
+
+    id_to_idx = {nid: i for i, nid in enumerate(nodes["id"].tolist())}
+    kind = nodes["kind"].to_numpy()
+    bin_mask = kind == "bin"
+    genome_mask = kind == "genome"
+    bin_ids = np.where(bin_mask)[0]
+    genome_ids = np.where(genome_mask)[0]
+    n_bins = bin_ids.size
+    n_genomes = genome_ids.size
+
+    if n_bins == 0 or n_genomes == 0 or len(edges) == 0:
+        # Degenerate: nothing to co-embed. Fall back to radial-spectral so we
+        # still return *some* reasonable coordinates for downstream code.
+        return _radial_spectral_layout(graph, seed=seed)
+
+    # Build dense (n_genomes, n_bins) weighted matrix. We use a local index
+    # for each side so SVD/t-SNE see compact matrices.
+    g_local = {gid: i for i, gid in enumerate(genome_ids.tolist())}
+    b_local = {bid: i for i, bid in enumerate(bin_ids.tolist())}
+    src = edges["source"].map(id_to_idx).to_numpy()
+    tgt = edges["target"].map(id_to_idx).to_numpy()
+    w = edges["weight"].to_numpy(dtype=np.float64)
+    src_is_bin = bin_mask[src]
+    bin_side = np.where(src_is_bin, src, tgt)
+    genome_side = np.where(src_is_bin, tgt, src)
+
+    M = np.zeros((n_genomes, n_bins), dtype=np.float64)
+    for b_idx, g_idx, weight in zip(bin_side, genome_side, w):
+        gi = g_local.get(int(g_idx))
+        bi = b_local.get(int(b_idx))
+        if gi is None or bi is None:
+            continue
+        # max() handles the case of repeated (bin, genome) pairs in input.
+        if weight > M[gi, bi]:
+            M[gi, bi] = weight
+
+    # TF-IDF-like weighting: downweight bins that appear in most genomes so
+    # similarity is driven by shared accessory content.
+    df_per_bin = (M > 0).sum(axis=0).astype(np.float64)
+    idf = np.log((n_genomes + 1.0) / (df_per_bin + 1.0)) + 1.0
+    W = M * idf
+
+    # Center and SVD. Graphs too tiny for a 2D embedding fall back to the
+    # radial layout so the caller always gets coordinates.
+    if n_genomes < 2 or n_bins < 2:
+        return _radial_spectral_layout(graph, seed=seed)
+    k = int(min(30, n_genomes, n_bins))
+    W_centered = W - W.mean(axis=0, keepdims=True)
+    try:
+        U, S, Vt = np.linalg.svd(W_centered, full_matrices=False)
+    except np.linalg.LinAlgError:
+        return _radial_spectral_layout(graph, seed=seed)
+    U_k = U[:, :k] * S[:k]
+    V_k = Vt[:k, :].T * S[:k]
+    joint = np.vstack([U_k, V_k])  # (n_genomes + n_bins, k)
+    if joint.shape[1] < 2:
+        pad = np.zeros((joint.shape[0], 2 - joint.shape[1]))
+        joint = np.hstack([joint, pad])
+
+    # t-SNE to 2D on the joint latent space. Falls back to (SVD1, SVD2) if
+    # t-SNE is not available or if the input is too small for a stable
+    # perplexity.
+    n_joint = joint.shape[0]
+    if _HAS_TSNE and n_joint >= 6:
+        perplexity = float(min(30, max(5, (n_joint - 1) // 3)))
+        try:
+            tsne = TSNE(
+                n_components=2,
+                perplexity=perplexity,
+                random_state=seed,
+                init="pca",
+                learning_rate="auto",
+                metric="euclidean",
+            )
+            coords = tsne.fit_transform(joint)
+        except Exception:
+            coords = joint[:, :2]
+    else:
+        coords = joint[:, :2]
+
+    # Scatter back into node-order x/y.
+    x = np.zeros(n, dtype=np.float64)
+    y = np.zeros(n, dtype=np.float64)
+    for gi, node_idx in enumerate(genome_ids):
+        x[node_idx] = coords[gi, 0]
+        y[node_idx] = coords[gi, 1]
+    for bi, node_idx in enumerate(bin_ids):
+        x[node_idx] = coords[n_genomes + bi, 0]
+        y[node_idx] = coords[n_genomes + bi, 1]
+
+    return _normalize_unit_square(
+        nodes["id"].tolist(), np.stack([x, y], axis=1)
+    )
 
 
 def _igraph_layout(graph: Graph, algorithm: str, seed: int) -> pd.DataFrame:
@@ -58,23 +190,7 @@ def _igraph_layout(graph: Graph, algorithm: str, seed: int) -> pd.DataFrame:
 
 
 def _radial_spectral_layout(graph: Graph, seed: int) -> pd.DataFrame:
-    """Layout bins on concentric shells by prevalence; angles from Fiedler vector.
-
-    Bins:
-        r   grows with (1 - prevalence / max_prevalence), so core bins sit
-            near the center and cloud bins on an outer bin-ring.
-        θ   comes from the rank of the Fiedler vector of the weighted
-            normalized Laplacian, so bins that co-occur in the same genomes
-            land in the same angular wedge.
-
-    Genomes (option b: free in the outer band):
-        θ   circular weighted mean of connected bins' angles, weighted by
-            edge weight — a genome drifts toward the wedge its accessory
-            content comes from.
-        r   outer band, pushed further out the more diffuse the genome's
-            bin signature is (1 − circular concentration), so content-wise
-            outliers visibly escape the ring.
-    """
+    """Radial by prevalence, angular by Fiedler vector — kept as a fallback."""
     nodes = graph.nodes
     edges = graph.edges
     n = len(nodes)
@@ -99,11 +215,8 @@ def _radial_spectral_layout(graph: Graph, seed: int) -> pd.DataFrame:
         max_prev = 1.0
 
     r = np.zeros(n, dtype=np.float64)
-    # bins: core (r≈0.10) → cloud (r≈0.70)
     r[is_bin] = 0.10 + 0.60 * (1.0 - bin_prev / max_prev)
 
-    # genomes: option (b) — θ = circular mean of incident bins' θ;
-    # r pushed out by diffuseness of the genome's bin-angle distribution.
     if edges is not None and len(edges):
         src = edges["source"].map(id_to_idx).to_numpy()
         tgt = edges["target"].map(id_to_idx).to_numpy()
@@ -132,25 +245,18 @@ def _radial_spectral_layout(graph: Graph, seed: int) -> pd.DataFrame:
         theta_g[~has_edges] = rng.uniform(-np.pi, np.pi, size=int((~has_edges).sum()))
         theta[genome_idx] = theta_g
 
-        # circular concentration R ∈ [0, 1]; R=1 means all bin-angles aligned,
-        # R=0 means uniform spread. Diffuseness = 1 - R.
         R = np.zeros(len(genome_idx), dtype=np.float64)
         denom = w_accum[genome_idx]
-        mag = np.sqrt(
-            cos_accum[genome_idx] ** 2 + sin_accum[genome_idx] ** 2
-        )
+        mag = np.sqrt(cos_accum[genome_idx] ** 2 + sin_accum[genome_idx] ** 2)
         R[has_edges] = mag[has_edges] / denom[has_edges]
         diffuse = 1.0 - R
-        # outer band [0.80, 1.00]: tight-signature genomes inner, diffuse outer
-        r_g = 0.80 + 0.20 * diffuse
-        r[genome_idx] = r_g
+        r[genome_idx] = 0.80 + 0.20 * diffuse
     else:
         r[is_genome] = 0.90
 
     x = r * np.cos(theta)
     y = r * np.sin(theta)
-    coords = np.stack([x, y], axis=1)
-    return _normalize_unit_square(nodes["id"].tolist(), coords)
+    return _normalize_unit_square(nodes["id"].tolist(), np.stack([x, y], axis=1))
 
 
 def _fiedler_angles(
@@ -159,14 +265,6 @@ def _fiedler_angles(
     id_to_idx: dict[str, int],
     seed: int,
 ) -> np.ndarray:
-    """Map the Fiedler vector of the weighted normalized Laplacian to angles.
-
-    Uses the rank of the Fiedler entries mapped uniformly to [-π, π) — rank
-    order is more stable than raw values when the spectrum has clustered
-    eigenvalues, and it guarantees good angular spacing on small graphs.
-    Falls back to a random order if the eigensolver fails or the graph is
-    trivially small.
-    """
     rng = np.random.default_rng(seed)
     if n <= 1:
         return np.zeros(n, dtype=np.float64)
@@ -175,7 +273,6 @@ def _fiedler_angles(
     if fiedler is None:
         fiedler = rng.standard_normal(n)
 
-    # Break ties deterministically with tiny seeded jitter so argsort is stable.
     jitter = rng.standard_normal(n) * 1e-9
     order = np.argsort(fiedler + jitter)
     ranks = np.empty(n, dtype=np.int64)
@@ -220,8 +317,6 @@ def _try_compute_fiedler(
     D_inv_sqrt = sp.diags(d_inv_sqrt)
     L = sp.eye(n, format="csr") - D_inv_sqrt @ A @ D_inv_sqrt
 
-    # Ask for the 2 smallest eigenvalues; shift-invert at sigma=0 is much
-    # more reliable than which='SM' for normalized Laplacians.
     k = 2 if n > 2 else 1
     try:
         vals, vecs = eigsh(L, k=k, sigma=0.0, which="LM")
@@ -241,8 +336,6 @@ def _try_compute_fiedler(
     else:
         fiedler = vecs[:, order[1]]
 
-    # Isolated nodes have an undefined Laplacian entry; place them deterministically
-    # at the extremes so they don't all stack at 0.
     if isolated.any():
         fiedler = fiedler.copy()
         fiedler[isolated] = np.linspace(-1.0, 1.0, int(isolated.sum()))

@@ -1,8 +1,9 @@
 """Generate a synthetic gig-map-style output directory for the bundled demo.
 
 Produces demo-data/bin_pangenome/{gene_bins.csv, genome_content.long.csv} with
-realistic structure: a small pangenome with core / shell / cloud bins across
-several simulated taxa.
+realistic structure: a small pangenome with a common core, clade-specific
+shell blocks (so clades actually cluster in the embedding), and rare cloud
+bins scattered across individual genomes.
 """
 
 from __future__ import annotations
@@ -30,14 +31,17 @@ TAXA = [
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=Path("demo-data"))
-    parser.add_argument("--genomes", type=int, default=80)
-    parser.add_argument("--bins", type=int, default=200)
+    parser.add_argument("--genomes", type=int, default=120)
+    parser.add_argument("--bins", type=int, default=300)
+    parser.add_argument("--clades", type=int, default=5)
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
     out_dir = args.out / "bin_pangenome"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    clade_ids = [f"clade_{c}" for c in range(args.clades)]
 
     genomes = []
     for i in range(args.genomes):
@@ -47,32 +51,57 @@ def main() -> int:
                 "genome": f"GCF_{i:07d}",
                 "genus": genus,
                 "species": f"{genus} {species}",
-                "clade": f"clade_{i % 4}",
+                "clade": clade_ids[i % args.clades],
             }
         )
 
+    # 15% core (ubiquitous), 60% shell (tagged to 1-2 clades), 25% cloud (rare).
     bins = []
     for b in range(args.bins):
-        if b < args.bins * 0.15:
-            partition, n_genes = "core", rng.randint(10, 40)
-        elif b < args.bins * 0.55:
-            partition, n_genes = "shell", rng.randint(4, 15)
+        r = b / args.bins
+        if r < 0.15:
+            partition = "core"
+            n_genes = rng.randint(10, 40)
+            tags: list[str] | None = None
+        elif r < 0.75:
+            partition = "shell"
+            n_genes = rng.randint(4, 15)
+            n_tags = 1 if rng.random() < 0.8 else 2
+            tags = rng.sample(clade_ids, n_tags)
         else:
-            partition, n_genes = "cloud", rng.randint(1, 6)
-        bins.append({"bin": f"bin_{b:04d}", "partition": partition, "n_genes": n_genes})
+            partition = "cloud"
+            n_genes = rng.randint(1, 6)
+            tags = None
+        bins.append(
+            {
+                "bin": f"bin_{b:04d}",
+                "partition": partition,
+                "n_genes": n_genes,
+                "clade_tags": tags,
+            }
+        )
 
     gene_bins_rows = []
     content_rows = []
     for bin_row in bins:
         bin_id = bin_row["bin"]
-        if bin_row["partition"] == "core":
-            present_prob = 0.95
-        elif bin_row["partition"] == "shell":
-            present_prob = 0.4
-        else:
-            present_prob = 0.08
+        partition = bin_row["partition"]
+        tags = bin_row["clade_tags"]
 
-        present_genomes = [g for g in genomes if rng.random() < present_prob]
+        present_genomes = []
+        for g in genomes:
+            if partition == "core":
+                p = 0.95
+            elif partition == "shell":
+                # Strong clade signal: in-clade genomes almost always carry the
+                # bin; out-of-clade genomes rarely do. This is what makes clades
+                # cluster in the embedding.
+                p = 0.85 if g["clade"] in tags else 0.03
+            else:  # cloud
+                p = 0.04
+            if rng.random() < p:
+                present_genomes.append(g)
+
         n_genomes = len(present_genomes)
 
         for gi in range(bin_row["n_genes"]):
@@ -81,7 +110,7 @@ def main() -> int:
                     "combined_name": f"{bin_id}_gene_{gi:03d}",
                     "bin": bin_id,
                     "n_genomes": n_genomes,
-                    "partition": bin_row["partition"],
+                    "partition": partition,
                 }
             )
 

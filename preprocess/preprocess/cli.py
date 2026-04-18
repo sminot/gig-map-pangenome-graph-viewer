@@ -39,11 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--layout",
-        default="radial-spectral",
-        choices=["radial-spectral", "drl", "fr", "kk"],
+        default="co-embed",
+        choices=["co-embed", "radial-spectral", "drl", "fr", "kk"],
         help=(
             "Layout algorithm for precomputed node positions "
-            "(default: radial-spectral — prevalence-radial, Fiedler-angular)."
+            "(default: co-embed — SVD + t-SNE joint embedding of bins and "
+            "genomes, so similarity groups are visible as 2D clusters)."
         ),
     )
     parser.add_argument(
