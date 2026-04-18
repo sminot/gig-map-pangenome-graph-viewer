@@ -11,6 +11,9 @@ import {
   renderLegend,
 } from "./ui";
 import { Palette } from "./palettes";
+import { attachDropzone } from "./dropzone";
+import { attachSearch } from "./search";
+import { exportPNG, exportSVG } from "./export";
 
 const DEFAULT_DATA_URL = "./graph";
 
@@ -58,34 +61,6 @@ function buildShareUrls(params: AppParams): { share: string; embed: string } {
   return { share, embed: iframe };
 }
 
-let currentSigma: Sigma | null = null;
-let detachPhysics: (() => void) | null = null;
-
-async function loadAndRender(dataUrl: string): Promise<{ data: GraphData; graph: Graph }> {
-  const data = await loadGraph(dataUrl);
-  const { graph } = buildGraph(data);
-  const nodesById = new Map<string, NodeRow>(data.nodes.map((n) => [n.id, n]));
-
-  const container = document.getElementById("sigma-container") as HTMLDivElement;
-
-  if (detachPhysics) {
-    detachPhysics();
-    detachPhysics = null;
-  }
-  if (currentSigma) {
-    currentSigma.kill();
-    currentSigma = null;
-  }
-  container.innerHTML = "";
-
-  const sigma = createSigma(graph, container);
-  attachTooltip(sigma, graph, nodesById);
-  detachPhysics = attachDragPhysics(graph, sigma);
-  currentSigma = sigma;
-
-  return { data, graph };
-}
-
 async function main() {
   const params = readParams();
   if (params.embed) document.body.classList.add("embed");
@@ -99,23 +74,24 @@ async function main() {
   const dataLoadBtn = document.getElementById("data-load") as HTMLButtonElement;
   const shareUrlEl = document.getElementById("share-url") as HTMLTextAreaElement;
   const embedSnippetEl = document.getElementById("embed-snippet") as HTMLTextAreaElement;
+  const searchInput = document.getElementById("search-input") as HTMLInputElement;
+  const exportPngBtn = document.getElementById("export-png") as HTMLButtonElement;
+  const exportSvgBtn = document.getElementById("export-svg") as HTMLButtonElement;
+  const container = document.getElementById("sigma-container") as HTMLDivElement;
+  const dropOverlay = document.getElementById("drop-overlay") as HTMLDivElement;
 
   if (params.data) dataUrlInput.value = params.data;
   if (params.binPalette) binPaletteSel.value = params.binPalette;
 
-  const initialUrl = params.data ?? DEFAULT_DATA_URL;
-  status.textContent = `Loading ${initialUrl}…`;
-
-  let { data, graph } = await loadAndRender(initialUrl);
-  status.textContent = `${initialUrl}: ${data.nodes.length} nodes, ${data.edges.length} edges`;
-  populateAttributeSelectors(data, binColorSel, genomeColorSel);
-  if (params.binColor) binColorSel.value = params.binColor;
-  if (params.genomeColor) genomeColorSel.value = params.genomeColor;
+  let data!: GraphData;
+  let graph!: Graph;
+  let sigma!: Sigma;
+  let detachPhysics: (() => void) | null = null;
 
   const state: EncodingState = {
-    binColorCol: binColorSel.value || null,
+    binColorCol: null,
     binPalette: (binPaletteSel.value as Palette) ?? "viridis",
-    genomeColorCol: genomeColorSel.value || null,
+    genomeColorCol: null,
   };
 
   const syncUrl = () => {
@@ -127,8 +103,11 @@ async function main() {
       embed: false,
     };
     const qs = writeParams(p);
-    const newUrl = `${window.location.pathname}${qs}${window.location.hash}`;
-    window.history.replaceState(null, "", newUrl);
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${qs}${window.location.hash}`,
+    );
     const urls = buildShareUrls(p);
     shareUrlEl.value = urls.share;
     embedSnippetEl.value = urls.embed;
@@ -140,9 +119,41 @@ async function main() {
     state.genomeColorCol = genomeColorSel.value || null;
     const legend = applyEncoding(graph, data, state);
     renderLegend(legendEl, legend);
-    if (currentSigma) currentSigma.refresh();
+    sigma.refresh();
     syncUrl();
   };
+
+  const installGraph = (next: GraphData, source: string) => {
+    if (detachPhysics) {
+      detachPhysics();
+      detachPhysics = null;
+    }
+    if (sigma) sigma.kill();
+    // sigma.kill() leaves the drop overlay in place; clear and re-mount it.
+    container.innerHTML = "";
+    container.appendChild(dropOverlay);
+
+    data = next;
+    const built = buildGraph(data);
+    graph = built.graph;
+    const nodesById = new Map<string, NodeRow>(data.nodes.map((n) => [n.id, n]));
+
+    sigma = createSigma(graph, container);
+    attachTooltip(sigma, graph, nodesById);
+    detachPhysics = attachDragPhysics(graph, sigma);
+    attachSearch(searchInput, sigma, graph);
+
+    populateAttributeSelectors(data, binColorSel, genomeColorSel);
+    if (params.binColor) binColorSel.value = params.binColor;
+    if (params.genomeColor) genomeColorSel.value = params.genomeColor;
+
+    status.textContent = `${source}: ${data.nodes.length} nodes, ${data.edges.length} edges`;
+    refresh();
+  };
+
+  const initialUrl = params.data ?? DEFAULT_DATA_URL;
+  status.textContent = `Loading ${initialUrl}…`;
+  installGraph(await loadGraph(initialUrl), initialUrl);
 
   binColorSel.addEventListener("change", refresh);
   genomeColorSel.addEventListener("change", refresh);
@@ -152,12 +163,7 @@ async function main() {
     const url = dataUrlInput.value.trim() || DEFAULT_DATA_URL;
     status.textContent = `Loading ${url}…`;
     try {
-      const next = await loadAndRender(url);
-      data = next.data;
-      graph = next.graph;
-      populateAttributeSelectors(data, binColorSel, genomeColorSel);
-      status.textContent = `${url}: ${data.nodes.length} nodes, ${data.edges.length} edges`;
-      refresh();
+      installGraph(await loadGraph(url), url);
     } catch (err) {
       status.textContent = `Error loading ${url}: ${err instanceof Error ? err.message : String(err)}`;
       console.error(err);
@@ -169,7 +175,17 @@ async function main() {
     if (ev.key === "Enter") reload();
   });
 
-  refresh();
+  attachDropzone(
+    container,
+    dropOverlay,
+    (next, src) => installGraph(next, src),
+    (msg) => {
+      status.textContent = `Drop failed: ${msg}`;
+    },
+  );
+
+  exportPngBtn.addEventListener("click", () => exportPNG(sigma));
+  exportSvgBtn.addEventListener("click", () => exportSVG(sigma, graph));
 }
 
 main().catch((err) => {

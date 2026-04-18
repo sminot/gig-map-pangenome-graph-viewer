@@ -18,7 +18,17 @@
           <label for="data-url">Base URL (folder with nodes/edges/meta .arrow)</label>
           <input id="data-url" type="url" placeholder="https://example.com/graph" />
           <button id="data-load" type="button">Load</button>
-          <p class="hint">Leave blank to use the bundled demo. Requires CORS headers on the remote host.</p>
+          <p class="hint">Leave blank to use the bundled demo. Or drag <code>nodes.arrow</code>, <code>edges.arrow</code>, and <code>meta.arrow</code> onto the canvas — fully local, no CORS needed.</p>
+        </section>
+        <section>
+          <h2>Search</h2>
+          <label for="search-input">Highlight matching nodes</label>
+          <input id="search-input" type="search" placeholder="bin_0001, GCF_0000005, …" />
+        </section>
+        <section>
+          <h2>Export</h2>
+          <button id="export-png" type="button">PNG</button>
+          <button id="export-svg" type="button">SVG</button>
         </section>
         <section>
           <h2>Bin color</h2>
@@ -56,7 +66,11 @@
           </ul>
         </section>
       </aside>
-      <div id="sigma-container"></div>
+      <div id="sigma-container">
+        <div id="drop-overlay">
+          <div>Drop <code>nodes.arrow</code>, <code>edges.arrow</code>, <code>meta.arrow</code> to load</div>
+        </div>
+      </div>
       <div id="tooltip" class="hidden"></div>
     </main>
     <script type="module" src="/src/main.ts"></script>

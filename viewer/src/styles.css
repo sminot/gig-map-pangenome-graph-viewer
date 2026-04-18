@@ -126,6 +126,46 @@ body.embed #controls {
   display: none;
 }
 
+#controls code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10px;
+}
+
+#drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 17, 23, 0.82);
+  border: 2px dashed var(--accent);
+  color: var(--text);
+  font-size: 15px;
+  text-align: center;
+  pointer-events: none;
+  z-index: 50;
+}
+
+#drop-overlay.active {
+  display: flex;
+}
+
+#drop-overlay code {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 13px;
+}
+
+#export-png,
+#export-svg {
+  margin-right: 6px;
+}
+
 #controls .help ul {
   margin: 0;
   padding-left: 18px;

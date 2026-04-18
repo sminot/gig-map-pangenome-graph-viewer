@@ -36,11 +36,33 @@ export async function loadGraph(baseUrl: string): Promise<GraphData> {
     fetchTable(`${baseUrl}/meta.arrow`),
   ]);
 
-  const nodes = tableToNodes(nodesTable);
-  const edges = tableToEdges(edgesTable);
-  const meta = tableToMeta(metaTable);
+  return decodeTables(nodesTable, edgesTable, metaTable);
+}
 
-  return { nodes, edges, meta };
+export interface RawBuffers {
+  nodes: Uint8Array;
+  edges: Uint8Array;
+  meta: Uint8Array;
+}
+
+export function loadGraphFromBuffers(buffers: RawBuffers): GraphData {
+  return decodeTables(
+    tableFromIPC(buffers.nodes),
+    tableFromIPC(buffers.edges),
+    tableFromIPC(buffers.meta),
+  );
+}
+
+function decodeTables(
+  nodesTable: Table,
+  edgesTable: Table,
+  metaTable: Table,
+): GraphData {
+  return {
+    nodes: tableToNodes(nodesTable),
+    edges: tableToEdges(edgesTable),
+    meta: tableToMeta(metaTable),
+  };
 }
 
 async function fetchTable(url: string): Promise<Table> {
