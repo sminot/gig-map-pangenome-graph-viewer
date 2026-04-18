@@ -39,11 +39,16 @@ All captures use the bundled synthetic demo (80 genomes × 200 bins, core/shell/
 
 ![Search highlight](docs/screenshots/05-search.png)
 
+**Bin size scale — pick `linear`, `sqrt` (area-proportional, default), or `log`. The legend at the bottom of the sidebar shows three representative `n_genes` values at their rendered diameters.**
+
+![Size legend (log scale)](docs/screenshots/06-size-legend.png)
+
 ## Features
 
 - **WebGL rendering** via Sigma.js v3 — handles tens of thousands of nodes
 - **Bipartite visual language** — distinct shapes and palettes for bins vs. genomes
 - **Live color encoding** — pick any attribute column (numeric → sequential palette; categorical → Okabe-Ito colorblind-safe)
+- **Bin size scale** — `linear`, `sqrt` (area-proportional), or `log`, with a built-in size legend
 - **Drag physics** — click and drag a node; neighbors spring around via a `graphology-layout-forceatlas2` worker
 - **Three ways to load data** — bundled demo, remote URL (`?data=…`), or drag-and-drop the three `.arrow` files onto the canvas
 - **Search / highlight** — filter by label, matching nodes pop while the rest fade
@@ -134,6 +139,7 @@ Host the output of `gig-map-preprocess` (the three `.arrow` files) anywhere — 
 | `binColor` | Bin attribute column to use for color |
 | `genomeColor` | Genome attribute column to use for color |
 | `binPalette` | `viridis`, `plasma`, or `category` |
+| `binSize` | `linear`, `sqrt`, or `log` (size scale for bin nodes) |
 | `embed` | `1` to hide the header and side panel (for iframe embedding) |
 
 A filter from a lasso-select is appended to the URL as `#f=<lz-compressed>` so the exact subset of visible nodes is part of any shareable link.

@@ -1,7 +1,7 @@
 import type Sigma from "sigma";
 import type Graph from "graphology";
 import type { GraphData, MetaRow, NodeRow } from "./loader";
-import type { LegendData, LegendEntry } from "./encoding";
+import type { LegendData, LegendEntry, SizeLegend } from "./encoding";
 import { categoricalColor, sampleSequential } from "./palettes";
 
 export function populateAttributeSelectors(
@@ -87,6 +87,38 @@ export function renderLegend(
   container.innerHTML = "";
   container.appendChild(renderSection("Bins (circles)", legend.binLegend));
   container.appendChild(renderSection("Genomes (squares)", legend.genomeLegend));
+  if (legend.sizeLegend) {
+    container.appendChild(renderSizeLegend(legend.sizeLegend));
+  }
+}
+
+function renderSizeLegend(legend: SizeLegend): HTMLElement {
+  const wrap = document.createElement("div");
+  const h = document.createElement("div");
+  h.style.fontWeight = "600";
+  h.style.marginTop = "10px";
+  h.textContent = `Bin size (${legend.column}, ${legend.scale})`;
+  wrap.appendChild(h);
+
+  const row = document.createElement("div");
+  row.className = "size-legend-row";
+  for (const tick of legend.ticks) {
+    const cell = document.createElement("div");
+    cell.className = "size-legend-cell";
+    const dot = document.createElement("span");
+    dot.className = "size-legend-dot";
+    const d = Math.max(4, tick.size * 2);
+    dot.style.width = `${d}px`;
+    dot.style.height = `${d}px`;
+    cell.appendChild(dot);
+    const label = document.createElement("span");
+    label.className = "size-legend-label";
+    label.textContent = String(tick.value);
+    cell.appendChild(label);
+    row.appendChild(cell);
+  }
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function renderSection(title: string, entry: LegendEntry | null): HTMLElement {

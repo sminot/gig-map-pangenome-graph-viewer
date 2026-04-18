@@ -174,6 +174,26 @@ async function main() {
     await page.screenshot({
       path: join(OUT_DIR, "05-search.png"),
     });
+
+    // 5. Bin size scale (log) with the size legend visible
+    await page.evaluate(() => {
+      const el = document.getElementById("search-input");
+      if (el) {
+        el.value = "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await page.select("#bin-size-scale", "log");
+    await new Promise((r) => setTimeout(r, 300));
+    // Scroll the sidebar so the legend (including the size legend) is in view.
+    await page.evaluate(() => {
+      const c = document.getElementById("controls");
+      if (c) c.scrollTop = c.scrollHeight;
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    await page.screenshot({
+      path: join(OUT_DIR, "06-size-legend.png"),
+    });
   } finally {
     await browser.close();
     server.close();

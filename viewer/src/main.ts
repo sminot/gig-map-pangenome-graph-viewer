@@ -8,7 +8,7 @@ import { loadGraph, GraphData, NodeRow } from "./loader";
 import { buildGraph } from "./graph";
 import { createSigma } from "./render";
 import { attachDragPhysics } from "./physics";
-import { applyEncoding, EncodingState } from "./encoding";
+import { applyEncoding, EncodingState, SizeScale } from "./encoding";
 import {
   attachTooltip,
   populateAttributeSelectors,
@@ -28,12 +28,14 @@ interface AppParams {
   binColor: string | null;
   genomeColor: string | null;
   binPalette: Palette | null;
+  binSize: SizeScale | null;
   embed: boolean;
 }
 
 function readParams(): AppParams {
   const q = new URLSearchParams(window.location.search);
   const palette = q.get("binPalette");
+  const size = q.get("binSize");
   return {
     data: q.get("data"),
     binColor: q.get("binColor"),
@@ -42,6 +44,8 @@ function readParams(): AppParams {
       palette === "viridis" || palette === "plasma" || palette === "category"
         ? palette
         : null,
+    binSize:
+      size === "linear" || size === "sqrt" || size === "log" ? size : null,
     embed: q.get("embed") === "1",
   };
 }
@@ -52,6 +56,7 @@ function writeParams(params: AppParams): string {
   if (params.binColor) q.set("binColor", params.binColor);
   if (params.genomeColor) q.set("genomeColor", params.genomeColor);
   if (params.binPalette) q.set("binPalette", params.binPalette);
+  if (params.binSize) q.set("binSize", params.binSize);
   if (params.embed) q.set("embed", "1");
   const qs = q.toString();
   return qs ? `?${qs}` : "";
@@ -99,6 +104,7 @@ async function main() {
   const binColorSel = document.getElementById("bin-color") as HTMLSelectElement;
   const genomeColorSel = document.getElementById("genome-color") as HTMLSelectElement;
   const binPaletteSel = document.getElementById("bin-palette") as HTMLSelectElement;
+  const binSizeScaleSel = document.getElementById("bin-size-scale") as HTMLSelectElement;
   const legendEl = document.getElementById("legend") as HTMLDivElement;
   const dataUrlInput = document.getElementById("data-url") as HTMLInputElement;
   const dataLoadBtn = document.getElementById("data-load") as HTMLButtonElement;
@@ -120,6 +126,7 @@ async function main() {
 
   if (params.data) dataUrlInput.value = params.data;
   if (params.binPalette) binPaletteSel.value = params.binPalette;
+  if (params.binSize) binSizeScaleSel.value = params.binSize;
 
   let data!: GraphData;
   let graph!: Graph;
@@ -133,6 +140,7 @@ async function main() {
     binColorCol: null,
     binPalette: (binPaletteSel.value as Palette) ?? "viridis",
     genomeColorCol: null,
+    binSizeScale: (binSizeScaleSel.value as SizeScale) ?? "sqrt",
   };
 
   const syncUrl = () => {
@@ -141,6 +149,7 @@ async function main() {
       binColor: state.binColorCol,
       genomeColor: state.genomeColorCol,
       binPalette: state.binPalette,
+      binSize: state.binSizeScale,
       embed: false,
     };
     const qs = writeParams(p);
@@ -175,6 +184,7 @@ async function main() {
     state.binColorCol = binColorSel.value || null;
     state.binPalette = (binPaletteSel.value as Palette) ?? "viridis";
     state.genomeColorCol = genomeColorSel.value || null;
+    state.binSizeScale = (binSizeScaleSel.value as SizeScale) ?? "sqrt";
     const legend = applyEncoding(graph, data, state);
     renderLegend(legendEl, legend);
     sigma.refresh();
@@ -257,6 +267,7 @@ async function main() {
   binColorSel.addEventListener("change", refresh);
   genomeColorSel.addEventListener("change", refresh);
   binPaletteSel.addEventListener("change", refresh);
+  binSizeScaleSel.addEventListener("change", refresh);
 
   const reload = async () => {
     const url = dataUrlInput.value.trim() || DEFAULT_DATA_URL;
