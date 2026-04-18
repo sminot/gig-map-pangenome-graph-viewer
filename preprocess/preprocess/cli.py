@@ -39,9 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--layout",
-        default="drl",
-        choices=["drl", "fr", "kk"],
-        help="Layout algorithm for precomputed node positions (default: drl).",
+        default="radial-spectral",
+        choices=["radial-spectral", "drl", "fr", "kk"],
+        help=(
+            "Layout algorithm for precomputed node positions "
+            "(default: radial-spectral — prevalence-radial, Fiedler-angular)."
+        ),
     )
     parser.add_argument(
         "--title",

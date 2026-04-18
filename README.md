@@ -9,39 +9,15 @@
 
 A static website that visualizes a [gig-map](https://github.com/FredHutch/gig-map) pangenome as a **bipartite graph** of gene bins and genomes.
 
+**Live demo: <https://sminot.github.io/gig-map-pangenome-graph-viewer/>**
+
 - **Bin nodes** (circles) — groups of co-occurring genes; size = number of genes in the bin.
 - **Genome nodes** (unfilled rings) — input genomes; colored by user-supplied metadata (taxonomy / clade / etc.).
 - **Edges** — a genome contains that bin (from `prop_genes_detected` in gig-map output).
 
-Hover for details; click and drag a node to watch neighbors respond with force-directed physics. Initial positions are precomputed in Python so the graph renders instantly and identically on every device.
+Positions are precomputed by a **radial-spectral** layout: bins sit on concentric shells by prevalence (core at center, cloud on the outer bin-ring), genomes ride in an outer band, and angular position comes from the Fiedler vector of the weighted bipartite Laplacian — so bins that co-occur and genomes with similar content end up in the same angular wedge. Hover for details; click and drag a node to watch neighbors respond with force-directed physics.
 
-## Screenshots
-
-All captures use the bundled synthetic demo (80 genomes × 200 bins, core/shell/cloud partitions).
-
-**Overview — bipartite graph, sequential bin color by gene count.**
-
-![Overview](docs/screenshots/01-overview.png)
-
-**Categorical coloring — bins by `partition` (core / shell / cloud), genomes by `clade`.**
-
-![Categorical coloring](docs/screenshots/02-color-by-partition.png)
-
-**Lasso selection — Shift + drag to select nodes; the action bar offers *Keep only*, *Hide*, or *Cancel*.**
-
-![Lasso selection](docs/screenshots/03-lasso-selection.png)
-
-**Filter applied — sidebar shows `Keeping 167 / 280` and a red *Clear filter* button. The filter state is encoded into the URL hash for shareable links.**
-
-![Filter applied](docs/screenshots/04-filter-applied.png)
-
-**Search — matching labels pop; non-matching nodes fade, incident edges mute.**
-
-![Search highlight](docs/screenshots/05-search.png)
-
-**Bin size scale — pick `linear`, `sqrt` (area-proportional, default), or `log`. The legend at the bottom of the sidebar shows three representative `n_genes` values at their rendered diameters.**
-
-![Size legend (log scale)](docs/screenshots/06-size-legend.png)
+![Overview — bins colored by `partition` (core / shell / cloud), genomes by `clade`](docs/screenshots/overview.png)
 
 ## Features
 
@@ -183,7 +159,7 @@ If you'd rather not host the Arrow files anywhere, drop them directly onto the v
 
 ## Tech stack
 
-- **Python** — `pandas`, `python-igraph` (layout), `pyarrow`
+- **Python** — `pandas`, `numpy` + `scipy` (radial-spectral layout), `python-igraph` (fallback layouts), `pyarrow`
 - **Viewer** — `sigma` v3 (WebGL), `graphology`, `graphology-layout-forceatlas2`, `apache-arrow`
 - **Build** — Vite + TypeScript (strict mode)
 
@@ -237,7 +213,7 @@ preprocess/preprocess/
   cli.py        # argparse entrypoint
   read.py       # fixed relative-path CSV reader; fails fast on missing files
   build.py      # bipartite bin<->genome graph + attribute derivation
-  layout.py     # python-igraph DrL/FR layout, normalized to [-1, 1]
+  layout.py     # radial-spectral layout (default) + python-igraph fallbacks; normalized to [-1, 1]
   write.py      # three Apache Arrow IPC files (nodes/edges/meta)
 
 viewer/src/
@@ -280,7 +256,7 @@ npm install --no-save puppeteer           # bundles a Chromium the script drives
 node scripts/capture_screenshots.mjs
 ```
 
-Outputs land in `docs/screenshots/`. The script spins up a tiny static server over `viewer/dist/`, drives the viewer with the default demo, and captures the overview, categorical coloring, lasso selection, applied filter, and search states.
+The script spins up a tiny static server over `viewer/dist/`, drives the viewer with the default demo under partition / clade coloring, and writes `docs/screenshots/overview.png`.
 
 ### Contributing
 
