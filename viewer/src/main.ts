@@ -29,6 +29,8 @@ interface AppParams {
   genomeColor: string | null;
   binPalette: Palette | null;
   binSize: SizeScale | null;
+  title: string | null;
+  description: string | null;
   embed: boolean;
 }
 
@@ -46,6 +48,8 @@ function readParams(): AppParams {
         : null,
     binSize:
       size === "linear" || size === "sqrt" || size === "log" ? size : null,
+    title: q.get("title"),
+    description: q.get("description"),
     embed: q.get("embed") === "1",
   };
 }
@@ -57,6 +61,8 @@ function writeParams(params: AppParams): string {
   if (params.genomeColor) q.set("genomeColor", params.genomeColor);
   if (params.binPalette) q.set("binPalette", params.binPalette);
   if (params.binSize) q.set("binSize", params.binSize);
+  if (params.title) q.set("title", params.title);
+  if (params.description) q.set("description", params.description);
   if (params.embed) q.set("embed", "1");
   const qs = q.toString();
   return qs ? `?${qs}` : "";
@@ -115,6 +121,9 @@ async function main() {
   const exportSvgBtn = document.getElementById("export-svg") as HTMLButtonElement;
   const container = document.getElementById("sigma-container") as HTMLDivElement;
   const dropOverlay = document.getElementById("drop-overlay") as HTMLDivElement;
+  const appTitleEl = document.getElementById("app-title") as HTMLHeadingElement;
+  const appDescriptionEl = document.getElementById("app-description") as HTMLParagraphElement;
+  const DEFAULT_TITLE = appTitleEl.textContent ?? "gig-map Pangenome Graph Viewer";
   const filterSection = document.getElementById("filter-section") as HTMLElement;
   const filterStatus = document.getElementById("filter-status") as HTMLParagraphElement;
   const filterClearBtn = document.getElementById("filter-clear") as HTMLButtonElement;
@@ -150,6 +159,8 @@ async function main() {
       genomeColor: state.genomeColorCol,
       binPalette: state.binPalette,
       binSize: state.binSizeScale,
+      title: params.title,
+      description: params.description,
       embed: false,
     };
     const qs = writeParams(p);
@@ -221,6 +232,20 @@ async function main() {
     showSelectionActions(selected);
   };
 
+  const applyHeader = (info: { title: string | null; description: string | null }) => {
+    const title = params.title ?? info.title ?? DEFAULT_TITLE;
+    const description = params.description ?? info.description ?? null;
+    appTitleEl.textContent = title;
+    document.title = title;
+    if (description) {
+      appDescriptionEl.textContent = description;
+      appDescriptionEl.classList.remove("hidden");
+    } else {
+      appDescriptionEl.textContent = "";
+      appDescriptionEl.classList.add("hidden");
+    }
+  };
+
   const installGraph = (next: GraphData, source: string) => {
     if (detachPhysics) {
       detachPhysics();
@@ -256,6 +281,7 @@ async function main() {
     }
 
     status.textContent = `${source}: ${data.nodes.length} nodes, ${data.edges.length} edges`;
+    applyHeader(data.info);
     refresh();
     applyCurrentFilter();
   };

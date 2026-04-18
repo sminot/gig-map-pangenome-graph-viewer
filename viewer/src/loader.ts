@@ -21,10 +21,16 @@ export interface MetaRow {
   category: "numeric" | "categorical";
 }
 
+export interface DatasetInfo {
+  title: string | null;
+  description: string | null;
+}
+
 export interface GraphData {
   nodes: NodeRow[];
   edges: EdgeRow[];
   meta: MetaRow[];
+  info: DatasetInfo;
 }
 
 const STRUCTURAL_NODE_COLS = new Set(["id", "kind", "label", "x", "y"]);
@@ -62,7 +68,19 @@ function decodeTables(
     nodes: tableToNodes(nodesTable),
     edges: tableToEdges(edgesTable),
     meta: tableToMeta(metaTable),
+    info: readSchemaInfo(metaTable),
   };
+}
+
+function readSchemaInfo(table: Table): DatasetInfo {
+  const meta = table.schema.metadata;
+  const get = (key: string) => {
+    const raw = meta?.get(key);
+    if (typeof raw !== "string") return null;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+  return { title: get("title"), description: get("description") };
 }
 
 async function fetchTable(url: string): Promise<Table> {

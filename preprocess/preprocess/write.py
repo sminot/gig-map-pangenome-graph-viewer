@@ -15,11 +15,19 @@ EDGES_FILE = "edges.arrow"
 META_FILE = "meta.arrow"
 
 
-def write_graph(graph: Graph, layout: pd.DataFrame, out_dir: Path) -> None:
+def write_graph(
+    graph: Graph,
+    layout: pd.DataFrame,
+    out_dir: Path,
+    title: str | None = None,
+    description: str | None = None,
+) -> None:
     """Write nodes.arrow, edges.arrow, and meta.arrow into `out_dir`.
 
     Three files keep the wire format simple (one IPC stream per schema) and
-    let the browser fetch them in parallel.
+    let the browser fetch them in parallel. `title` / `description` are
+    attached to meta.arrow as Arrow schema metadata so the viewer can display
+    dataset identity without a separate file.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -30,7 +38,16 @@ def write_graph(graph: Graph, layout: pd.DataFrame, out_dir: Path) -> None:
 
     _write_table(pa.Table.from_pandas(nodes, preserve_index=False), out_dir / NODES_FILE)
     _write_table(pa.Table.from_pandas(graph.edges, preserve_index=False), out_dir / EDGES_FILE)
-    _write_table(_build_meta_table(graph, nodes), out_dir / META_FILE)
+
+    meta = _build_meta_table(graph, nodes)
+    schema_meta: dict[bytes, bytes] = {}
+    if title:
+        schema_meta[b"title"] = title.encode("utf-8")
+    if description:
+        schema_meta[b"description"] = description.encode("utf-8")
+    if schema_meta:
+        meta = meta.replace_schema_metadata(schema_meta)
+    _write_table(meta, out_dir / META_FILE)
 
 
 def _write_table(table: pa.Table, path: Path) -> None:

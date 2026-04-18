@@ -125,6 +125,18 @@ cd viewer && npm run build
 
 The preprocessor validates required columns fail-fast and tolerates extra annotation columns (they become available in the viewer's color-mapping dropdowns).
 
+### Dataset title & description
+
+Pass `--title` and `--description` to the preprocessor to stamp dataset identity into the output:
+
+```bash
+python -m preprocess.cli /path/to/gig-map/output --out viewer/public/graph \
+  --title "HMP-2 gut pangenome, 2025 refresh" \
+  --description "2,143 MAGs × 8,412 bins; min prop_genes_detected 0.5"
+```
+
+Both strings are embedded in `meta.arrow`'s schema metadata, so the viewer picks them up automatically — no separate file, no extra fetch. URL params `?title=...&description=...` override whatever the data carries, handy for ad-hoc re-labeling of an existing dataset (for example, a curated embed).
+
 ## Loading data from any URL (shareable links + embeds)
 
 The viewer can load preprocessed Arrow files from any publicly reachable URL, so one deployed site can view many different pangenomes.
@@ -140,6 +152,8 @@ Host the output of `gig-map-preprocess` (the three `.arrow` files) anywhere — 
 | `genomeColor` | Genome attribute column to use for color |
 | `binPalette` | `viridis`, `plasma`, or `category` |
 | `binSize` | `linear`, `sqrt`, or `log` (size scale for bin nodes) |
+| `title` | Overrides the dataset title baked into `meta.arrow` |
+| `description` | Overrides the dataset description baked into `meta.arrow` |
 | `embed` | `1` to hide the header and side panel (for iframe embedding) |
 
 A filter from a lasso-select is appended to the URL as `#f=<lz-compressed>` so the exact subset of visible nodes is part of any shareable link.

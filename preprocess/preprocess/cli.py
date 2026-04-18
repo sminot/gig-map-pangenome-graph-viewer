@@ -43,12 +43,28 @@ def main(argv: list[str] | None = None) -> int:
         choices=["drl", "fr", "kk"],
         help="Layout algorithm for precomputed node positions (default: drl).",
     )
+    parser.add_argument(
+        "--title",
+        default=None,
+        help="Dataset title shown in the viewer header (optional).",
+    )
+    parser.add_argument(
+        "--description",
+        default=None,
+        help="One-line dataset description shown under the title (optional).",
+    )
     args = parser.parse_args(argv)
 
     tables = read_gigmap(args.input_dir)
     graph = build_graph(tables, min_prop_detected=args.min_prop_detected)
     layout = compute_layout(graph, algorithm=args.layout)
-    write_graph(graph, layout, args.out)
+    write_graph(
+        graph,
+        layout,
+        args.out,
+        title=args.title,
+        description=args.description,
+    )
 
     print(
         f"Wrote {len(graph.nodes)} nodes and {len(graph.edges)} edges to {args.out}",

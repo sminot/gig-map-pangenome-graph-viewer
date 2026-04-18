@@ -29,7 +29,10 @@ jobs:
         run: python scripts/generate_demo_data.py --out demo-data
 
       - name: Run preprocessor
-        run: python -m preprocess.cli demo-data --out viewer/public/graph
+        run: |
+          python -m preprocess.cli demo-data --out viewer/public/graph \
+            --title "PR #${{ github.event.pull_request.number }} preview" \
+            --description "${{ github.event.pull_request.title }}"
 
       - uses: actions/setup-node@v4
         with:
