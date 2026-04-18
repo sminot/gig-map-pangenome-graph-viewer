@@ -10,7 +10,7 @@
 A static website that visualizes a [gig-map](https://github.com/FredHutch/gig-map) pangenome as a **bipartite graph** of gene bins and genomes.
 
 - **Bin nodes** (circles) — groups of co-occurring genes; size = number of genes in the bin.
-- **Genome nodes** (squares) — input genomes; colored by user-supplied metadata (taxonomy / clade / etc.).
+- **Genome nodes** (unfilled rings) — input genomes; colored by user-supplied metadata (taxonomy / clade / etc.).
 - **Edges** — a genome contains that bin (from `prop_genes_detected` in gig-map output).
 
 Hover for details; click and drag a node to watch neighbors respond with force-directed physics. Initial positions are precomputed in Python so the graph renders instantly and identically on every device.
@@ -46,7 +46,7 @@ All captures use the bundled synthetic demo (80 genomes × 200 bins, core/shell/
 ## Features
 
 - **WebGL rendering** via Sigma.js v3 — handles tens of thousands of nodes
-- **Bipartite visual language** — distinct shapes and palettes for bins vs. genomes
+- **Bipartite visual language** — filled circles for bins, unfilled rings for genomes, with independent palettes
 - **Live color encoding** — pick any attribute column (numeric → sequential palette; categorical → Okabe-Ito colorblind-safe)
 - **Bin size scale** — `linear`, `sqrt` (area-proportional), or `log`, with a built-in size legend
 - **Drag physics** — click and drag a node; neighbors spring around via a `graphology-layout-forceatlas2` worker
@@ -230,7 +230,7 @@ viewer/src/
   main.ts       # wiring: load -> install graph -> encoding, search, export, drag-drop
   loader.ts     # Arrow IPC decode (URL fetch + raw-buffer variants)
   graph.ts      # graphology Graph construction from parsed data
-  render.ts     # Sigma.js setup + custom node programs (circle / square)
+  render.ts     # Sigma.js setup + node programs (filled circle / ring)
   physics.ts    # FA2 worker + click-drag neighbor-spring behavior
   encoding.ts   # attribute -> color/size mapping; emits legend metadata
   palettes.ts   # viridis, plasma, Okabe-Ito categorical

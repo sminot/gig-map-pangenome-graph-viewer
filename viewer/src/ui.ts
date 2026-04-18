@@ -85,8 +85,8 @@ export function renderLegend(
   legend: LegendData,
 ): void {
   container.innerHTML = "";
-  container.appendChild(renderSection("Bins (circles)", legend.binLegend));
-  container.appendChild(renderSection("Genomes (squares)", legend.genomeLegend));
+  container.appendChild(renderSection("Bins (filled)", legend.binLegend));
+  container.appendChild(renderSection("Genomes (rings)", legend.genomeLegend));
   if (legend.sizeLegend) {
     container.appendChild(renderSizeLegend(legend.sizeLegend));
   }

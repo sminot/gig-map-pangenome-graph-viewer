@@ -4,7 +4,7 @@ import { Palette, categoricalColor, sampleSequential } from "./palettes";
 
 const BIN_FALLBACK = "#58a6ff";
 const GENOME_FALLBACK = "#f0883e";
-const GENOME_SIZE = 6;
+const GENOME_SIZE = 9;
 const BIN_SIZE_MIN = 4;
 const BIN_SIZE_MAX = 22;
 

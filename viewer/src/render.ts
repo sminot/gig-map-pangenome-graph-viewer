@@ -1,6 +1,25 @@
 import Sigma from "sigma";
-import { NodeSquareProgram } from "@sigma/node-square";
+import { createNodeBorderProgram } from "@sigma/node-border";
 import type Graph from "graphology";
+
+/**
+ * Genome nodes render as unfilled "rings": a 2px outer band in the node's
+ * color, with the center filled in the canvas background so it reads as an
+ * outline against edges. Bins keep the default solid-filled circle.
+ */
+const RING_BACKGROUND = "#010409";
+const RING_PROGRAM = createNodeBorderProgram({
+  borders: [
+    {
+      color: { attribute: "color" },
+      size: { value: 2, mode: "pixels" },
+    },
+    {
+      color: { value: RING_BACKGROUND },
+      size: { fill: true },
+    },
+  ],
+});
 
 export function createSigma(graph: Graph, container: HTMLElement): Sigma {
   const renderer = new Sigma(graph, container, {
@@ -8,7 +27,7 @@ export function createSigma(graph: Graph, container: HTMLElement): Sigma {
     enableEdgeEvents: false,
     defaultNodeType: "circle",
     nodeProgramClasses: {
-      square: NodeSquareProgram,
+      ring: RING_PROGRAM,
     },
     labelDensity: 0.2,
     labelGridCellSize: 80,

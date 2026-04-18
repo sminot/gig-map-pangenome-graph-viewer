@@ -21,7 +21,7 @@ export function buildGraph(data: GraphData): BuildResult {
       y: n.y,
       size: defaultSize(n),
       color: defaultColor(n),
-      type: n.kind === "genome" ? "square" : "circle",
+      type: n.kind === "genome" ? "ring" : "circle",
       attrs: n.attrs,
     });
     if (n.kind === "bin") binIds.push(n.id);

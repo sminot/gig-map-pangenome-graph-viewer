@@ -76,10 +76,9 @@ export function exportSVG(
     const p = sigma.graphToViewport({ x: attrs.x, y: attrs.y });
     const color = attrs.color ?? "#58a6ff";
     const size = attrs.size ?? 4;
-    if (attrs.type === "square") {
-      const s = size * 2;
+    if (attrs.type === "ring") {
       parts.push(
-        `<rect x="${(p.x - size).toFixed(2)}" y="${(p.y - size).toFixed(2)}" width="${s.toFixed(2)}" height="${s.toFixed(2)}" fill="${escapeAttr(color)}"/>`,
+        `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${size.toFixed(2)}" fill="none" stroke="${escapeAttr(color)}" stroke-width="2"/>`,
       );
     } else {
       parts.push(
