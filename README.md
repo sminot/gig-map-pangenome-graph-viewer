@@ -244,15 +244,17 @@ viewer/src/
 
 ### Deployment
 
-`.github/workflows/pages.yml` runs on push to `main`:
+`.github/workflows/pages.yml` runs on push to `main` — it builds `viewer/dist/` and deploys it to the root of the `gh-pages` branch via `JamesIves/github-pages-deploy-action`, preserving the `pr-preview/` subtree so open-PR previews survive a production deploy.
 
-1. Installs the Python preprocessor
-2. Regenerates `demo-data/` via the scripted generator
-3. Runs `python -m preprocess.cli demo-data --out viewer/public/graph`
-4. Builds the viewer with `npm ci && npm run build`
-5. Force-pushes `viewer/dist/` to the `gh-pages` branch (orphan, single commit per deploy)
+`.github/workflows/preview.yml` runs on every PR open/synchronize/reopen — it builds the viewer with Vite's `--base` set to `/<repo>/pr-preview/pr-<N>/`, deploys to that subfolder on `gh-pages` (with `clean: false` so other previews stay put), and posts (or updates) a sticky comment on the PR with the preview URL. The comment links to:
 
-**One-time repo setup:** in **Settings → Pages**, set **Source** = *Deploy from a branch*, **Branch** = `gh-pages`, **Folder** = `/ (root)`. GitHub Pages then serves the most recent deploy from that branch. The first deploy creates the branch automatically.
+```
+https://<owner>.github.io/<repo>/pr-preview/pr-<N>/
+```
+
+`.github/workflows/preview-cleanup.yml` runs on PR closed — it checks out `gh-pages` and deletes the corresponding `pr-preview/pr-<N>/` directory in a single commit.
+
+**One-time repo setup:** in **Settings → Pages**, set **Source** = *Deploy from a branch*, **Branch** = `gh-pages`, **Folder** = `/ (root)`. GitHub Pages then serves the most recent deploy (and any active PR previews) from that branch. The first deploy creates the branch automatically.
 
 To deploy elsewhere, point any static host at the `viewer/dist/` output after `npm run build`.
 
