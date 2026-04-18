@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+node_modules/
+viewer/dist/
+viewer/public/graph/
+
+# Generated synthetic demo data (regenerate via scripts/generate_demo_data.py)
+demo-data/
+
+.DS_Store
+.vscode/
+.idea/
