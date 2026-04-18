@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>gig-map Pangenome Graph Viewer</title>
+    <script type="module" crossorigin src="./assets/index-DJ9_QKpa.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Ct4acv6h.css">
+  </head>
+  <body>
+    <header>
+      <div class="header-text">
+        <h1 id="app-title">gig-map Pangenome Graph Viewer</h1>
+        <p id="app-description" class="hidden"></p>
+      </div>
+      <p id="status">Loading…</p>
+    </header>
+    <main>
+      <aside id="controls">
+        <section>
+          <h2>Data source</h2>
+          <label for="data-url">Base URL (folder with nodes/edges/meta .arrow)</label>
+          <input id="data-url" type="url" placeholder="https://example.com/graph" />
+          <button id="data-load" type="button">Load</button>
+          <p class="hint">Leave blank to use the bundled demo. Or drag <code>nodes.arrow</code>, <code>edges.arrow</code>, and <code>meta.arrow</code> onto the canvas — fully local, no CORS needed.</p>
+        </section>
+        <section>
+          <h2>Search</h2>
+          <label for="search-input">Highlight matching nodes</label>
+          <input id="search-input" type="search" placeholder="bin_0001, GCF_0000005, …" />
+        </section>
+        <section id="filter-section" class="hidden">
+          <h2>Filter</h2>
+          <p id="filter-status" class="filter-status"></p>
+          <button id="filter-clear" type="button" class="danger">Clear filter</button>
+          <p class="hint">Shift + drag on the canvas to lasso-select nodes.</p>
+        </section>
+        <section>
+          <h2>Export</h2>
+          <button id="export-png" type="button">PNG</button>
+          <button id="export-svg" type="button">SVG</button>
+        </section>
+        <section>
+          <h2>Bin color</h2>
+          <label for="bin-color">Attribute</label>
+          <select id="bin-color"></select>
+          <label for="bin-palette">Palette</label>
+          <select id="bin-palette">
+            <option value="viridis">Viridis (sequential)</option>
+            <option value="plasma">Plasma (sequential)</option>
+            <option value="category">Categorical</option>
+          </select>
+        </section>
+        <section>
+          <h2>Bin size</h2>
+          <label for="bin-size-scale">Scale (driven by <code>n_genes</code>)</label>
+          <select id="bin-size-scale">
+            <option value="sqrt">Square root (area-proportional)</option>
+            <option value="linear">Linear</option>
+            <option value="log">Log</option>
+          </select>
+        </section>
+        <section>
+          <h2>Genome color</h2>
+          <label for="genome-color">Attribute</label>
+          <select id="genome-color"></select>
+        </section>
+        <section>
+          <h2>Legend</h2>
+          <div id="legend"></div>
+        </section>
+        <section>
+          <h2>Share &amp; embed</h2>
+          <label for="share-url">Shareable URL</label>
+          <textarea id="share-url" rows="2" readonly></textarea>
+          <label for="embed-snippet">Embed (iframe)</label>
+          <textarea id="embed-snippet" rows="3" readonly></textarea>
+        </section>
+        <section class="help">
+          <h2>Controls</h2>
+          <ul>
+            <li>Hover a node for details</li>
+            <li>Click and drag a node — neighbors respond with force-directed physics</li>
+            <li>Scroll to zoom</li>
+          </ul>
+        </section>
+      </aside>
+      <div id="sigma-container">
+        <div id="drop-overlay">
+          <div>Drop <code>nodes.arrow</code>, <code>edges.arrow</code>, <code>meta.arrow</code> to load</div>
+        </div>
+      </div>
+      <div id="tooltip" class="hidden"></div>
+      <div id="selection-actions" class="hidden">
+        <span id="selection-count"></span>
+        <button id="selection-keep" type="button">Keep only</button>
+        <button id="selection-hide" type="button">Hide</button>
+        <button id="selection-cancel" type="button" class="ghost">Cancel</button>
+      </div>
+    </main>
+  </body>
+</html>
