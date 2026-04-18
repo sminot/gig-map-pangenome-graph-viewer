@@ -25,6 +25,12 @@
           <label for="search-input">Highlight matching nodes</label>
           <input id="search-input" type="search" placeholder="bin_0001, GCF_0000005, …" />
         </section>
+        <section id="filter-section" class="hidden">
+          <h2>Filter</h2>
+          <p id="filter-status" class="filter-status"></p>
+          <button id="filter-clear" type="button" class="danger">Clear filter</button>
+          <p class="hint">Shift + drag on the canvas to lasso-select nodes.</p>
+        </section>
         <section>
           <h2>Export</h2>
           <button id="export-png" type="button">PNG</button>
@@ -72,6 +78,12 @@
         </div>
       </div>
       <div id="tooltip" class="hidden"></div>
+      <div id="selection-actions" class="hidden">
+        <span id="selection-count"></span>
+        <button id="selection-keep" type="button">Keep only</button>
+        <button id="selection-hide" type="button">Hide</button>
+        <button id="selection-cancel" type="button" class="ghost">Cancel</button>
+      </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

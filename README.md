@@ -23,6 +23,7 @@ Hover for details; click and drag a node to watch neighbors respond with force-d
 - **Drag physics** — click and drag a node; neighbors spring around via a `graphology-layout-forceatlas2` worker
 - **Three ways to load data** — bundled demo, remote URL (`?data=…`), or drag-and-drop the three `.arrow` files onto the canvas
 - **Search / highlight** — filter by label, matching nodes pop while the rest fade
+- **Lasso select + filter** — `Shift + drag` draws a lasso; keep only the selected nodes or hide them, with a one-click clear. Filter state compresses into the URL hash for shareable subsets.
 - **Export** — PNG (canvas composite) or SVG (vector, publication-ready)
 - **Shareable links + iframe embed** — `?embed=1` strips the chrome for embedding
 - **Static hosting** — no server, no database, deploys to GitHub Pages out of the box
@@ -110,6 +111,8 @@ Host the output of `gig-map-preprocess` (the three `.arrow` files) anywhere — 
 | `genomeColor` | Genome attribute column to use for color |
 | `binPalette` | `viridis`, `plasma`, or `category` |
 | `embed` | `1` to hide the header and side panel (for iframe embedding) |
+
+A filter from a lasso-select is appended to the URL as `#f=<lz-compressed>` so the exact subset of visible nodes is part of any shareable link.
 
 **Shareable link example:**
 
@@ -204,6 +207,8 @@ viewer/src/
   search.ts     # label-substring search via Sigma node/edge reducers
   dropzone.ts   # drag-drop of nodes/edges/meta .arrow (or a folder)
   export.ts     # PNG (canvas composite) and SVG (synthesized from graph) export
+  lasso.ts      # shift+drag lasso overlay + point-in-polygon
+  filter.ts     # apply/clear keep|hide filter via node `hidden` attribute
   ui.ts        # tooltip, legend, attribute-selector population
 ```
 

@@ -1,5 +1,9 @@
 import Sigma from "sigma";
 import type Graph from "graphology";
+import {
+  compressToEncodedURIComponent,
+  decompressFromEncodedURIComponent,
+} from "lz-string";
 import { loadGraph, GraphData, NodeRow } from "./loader";
 import { buildGraph } from "./graph";
 import { createSigma } from "./render";
@@ -14,6 +18,8 @@ import { Palette } from "./palettes";
 import { attachDropzone } from "./dropzone";
 import { attachSearch } from "./search";
 import { exportPNG, exportSVG } from "./export";
+import { attachLasso, pointInPolygon } from "./lasso";
+import { applyFilter, FilterState } from "./filter";
 
 const DEFAULT_DATA_URL = "./graph";
 
@@ -51,12 +57,36 @@ function writeParams(params: AppParams): string {
   return qs ? `?${qs}` : "";
 }
 
-function buildShareUrls(params: AppParams): { share: string; embed: string } {
+function encodeFilter(filter: FilterState | null): string {
+  if (!filter || filter.ids.length === 0) return "";
+  const payload = JSON.stringify({ m: filter.mode, i: filter.ids });
+  return `#f=${compressToEncodedURIComponent(payload)}`;
+}
+
+function decodeFilter(hash: string): FilterState | null {
+  const match = /[#&]f=([^&]+)/.exec(hash);
+  if (!match) return null;
+  try {
+    const raw = decompressFromEncodedURIComponent(match[1]);
+    if (!raw) return null;
+    const obj = JSON.parse(raw) as { m?: unknown; i?: unknown };
+    const mode = obj.m === "hide" ? "hide" : "keep";
+    const ids = Array.isArray(obj.i) ? obj.i.map((v) => String(v)) : [];
+    if (ids.length === 0) return null;
+    return { mode, ids };
+  } catch {
+    return null;
+  }
+}
+
+function buildShareUrls(
+  params: AppParams,
+  filter: FilterState | null,
+): { share: string; embed: string } {
   const origin = `${window.location.origin}${window.location.pathname}`;
-  const shareParams: AppParams = { ...params, embed: false };
-  const embedParams: AppParams = { ...params, embed: true };
-  const share = `${origin}${writeParams(shareParams)}`;
-  const embedUrl = `${origin}${writeParams(embedParams)}`;
+  const hash = encodeFilter(filter);
+  const share = `${origin}${writeParams({ ...params, embed: false })}${hash}`;
+  const embedUrl = `${origin}${writeParams({ ...params, embed: true })}${hash}`;
   const iframe = `<iframe src="${embedUrl}" style="width:100%;height:600px;border:0" loading="lazy"></iframe>`;
   return { share, embed: iframe };
 }
@@ -79,6 +109,14 @@ async function main() {
   const exportSvgBtn = document.getElementById("export-svg") as HTMLButtonElement;
   const container = document.getElementById("sigma-container") as HTMLDivElement;
   const dropOverlay = document.getElementById("drop-overlay") as HTMLDivElement;
+  const filterSection = document.getElementById("filter-section") as HTMLElement;
+  const filterStatus = document.getElementById("filter-status") as HTMLParagraphElement;
+  const filterClearBtn = document.getElementById("filter-clear") as HTMLButtonElement;
+  const selectionActions = document.getElementById("selection-actions") as HTMLDivElement;
+  const selectionCount = document.getElementById("selection-count") as HTMLSpanElement;
+  const selectionKeepBtn = document.getElementById("selection-keep") as HTMLButtonElement;
+  const selectionHideBtn = document.getElementById("selection-hide") as HTMLButtonElement;
+  const selectionCancelBtn = document.getElementById("selection-cancel") as HTMLButtonElement;
 
   if (params.data) dataUrlInput.value = params.data;
   if (params.binPalette) binPaletteSel.value = params.binPalette;
@@ -87,6 +125,9 @@ async function main() {
   let graph!: Graph;
   let sigma!: Sigma;
   let detachPhysics: (() => void) | null = null;
+  let detachLasso: (() => void) | null = null;
+  let filter: FilterState | null = decodeFilter(window.location.hash);
+  let pendingSelection: string[] = [];
 
   const state: EncodingState = {
     binColorCol: null,
@@ -103,14 +144,31 @@ async function main() {
       embed: false,
     };
     const qs = writeParams(p);
+    const hash = encodeFilter(filter);
     window.history.replaceState(
       null,
       "",
-      `${window.location.pathname}${qs}${window.location.hash}`,
+      `${window.location.pathname}${qs}${hash}`,
     );
-    const urls = buildShareUrls(p);
+    const urls = buildShareUrls(p, filter);
     shareUrlEl.value = urls.share;
     embedSnippetEl.value = urls.embed;
+  };
+
+  const renderFilterUi = (visible: number, total: number) => {
+    if (!filter) {
+      filterSection.classList.add("hidden");
+      return;
+    }
+    filterSection.classList.remove("hidden");
+    const verb = filter.mode === "keep" ? "Keeping" : "Hiding";
+    filterStatus.textContent = `${verb} ${filter.ids.length} node(s). Showing ${visible} / ${total}.`;
+  };
+
+  const applyCurrentFilter = () => {
+    const { visibleCount, totalCount } = applyFilter(graph, sigma, filter);
+    renderFilterUi(visibleCount, totalCount);
+    syncUrl();
   };
 
   const refresh = () => {
@@ -123,13 +181,46 @@ async function main() {
     syncUrl();
   };
 
+  const showSelectionActions = (ids: string[]) => {
+    pendingSelection = ids;
+    if (ids.length === 0) {
+      selectionActions.classList.add("hidden");
+      return;
+    }
+    selectionCount.textContent = `${ids.length} node(s) selected`;
+    selectionActions.classList.remove("hidden");
+  };
+
+  const hideSelectionActions = () => {
+    pendingSelection = [];
+    selectionActions.classList.add("hidden");
+  };
+
+  const onLasso = (polygon: { x: number; y: number }[]) => {
+    const selected: string[] = [];
+    graph.forEachNode((id, attrs) => {
+      if (attrs.hidden) return;
+      if (pointInPolygon({ x: attrs.x, y: attrs.y }, polygon)) {
+        selected.push(id);
+      }
+    });
+    if (selected.length === 0) {
+      hideSelectionActions();
+      return;
+    }
+    showSelectionActions(selected);
+  };
+
   const installGraph = (next: GraphData, source: string) => {
     if (detachPhysics) {
       detachPhysics();
       detachPhysics = null;
     }
+    if (detachLasso) {
+      detachLasso();
+      detachLasso = null;
+    }
     if (sigma) sigma.kill();
-    // sigma.kill() leaves the drop overlay in place; clear and re-mount it.
     container.innerHTML = "";
     container.appendChild(dropOverlay);
 
@@ -142,13 +233,21 @@ async function main() {
     attachTooltip(sigma, graph, nodesById);
     detachPhysics = attachDragPhysics(graph, sigma);
     attachSearch(searchInput, sigma, graph);
+    detachLasso = attachLasso(sigma, container, onLasso);
 
     populateAttributeSelectors(data, binColorSel, genomeColorSel);
     if (params.binColor) binColorSel.value = params.binColor;
     if (params.genomeColor) genomeColorSel.value = params.genomeColor;
 
+    if (filter) {
+      const known = new Set(graph.nodes());
+      filter = { ...filter, ids: filter.ids.filter((id) => known.has(id)) };
+      if (filter.ids.length === 0) filter = null;
+    }
+
     status.textContent = `${source}: ${data.nodes.length} nodes, ${data.edges.length} edges`;
     refresh();
+    applyCurrentFilter();
   };
 
   const initialUrl = params.data ?? DEFAULT_DATA_URL;
@@ -178,7 +277,10 @@ async function main() {
   attachDropzone(
     container,
     dropOverlay,
-    (next, src) => installGraph(next, src),
+    (next, src) => {
+      filter = null;
+      installGraph(next, src);
+    },
     (msg) => {
       status.textContent = `Drop failed: ${msg}`;
     },
@@ -186,6 +288,29 @@ async function main() {
 
   exportPngBtn.addEventListener("click", () => exportPNG(sigma));
   exportSvgBtn.addEventListener("click", () => exportSVG(sigma, graph));
+
+  selectionKeepBtn.addEventListener("click", () => {
+    if (pendingSelection.length === 0) return;
+    filter = { mode: "keep", ids: pendingSelection };
+    hideSelectionActions();
+    applyCurrentFilter();
+  });
+  selectionHideBtn.addEventListener("click", () => {
+    if (pendingSelection.length === 0) return;
+    filter = { mode: "hide", ids: pendingSelection };
+    hideSelectionActions();
+    applyCurrentFilter();
+  });
+  selectionCancelBtn.addEventListener("click", hideSelectionActions);
+
+  filterClearBtn.addEventListener("click", () => {
+    filter = null;
+    applyCurrentFilter();
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") hideSelectionActions();
+  });
 }
 
 main().catch((err) => {
