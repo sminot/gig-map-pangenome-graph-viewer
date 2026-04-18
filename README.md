@@ -76,6 +76,41 @@ cd viewer && npm run build
 
 The preprocessor validates required columns fail-fast and tolerates extra annotation columns (they become available in the viewer's color-mapping dropdowns).
 
+## Loading data from any URL (shareable links + embeds)
+
+The viewer can load preprocessed Arrow files from any publicly reachable URL, so one deployed site can view many different pangenomes.
+
+Host the output of `gig-map-preprocess` (the three `.arrow` files) anywhere — S3, GitHub Releases, your own server — then point the viewer at the **base URL of the folder** containing them.
+
+**Query parameters:**
+
+| Param | Meaning |
+|---|---|
+| `data` | Base URL of a folder with `nodes.arrow`, `edges.arrow`, `meta.arrow` |
+| `binColor` | Bin attribute column to use for color |
+| `genomeColor` | Genome attribute column to use for color |
+| `binPalette` | `viridis`, `plasma`, or `category` |
+| `embed` | `1` to hide the header and side panel (for iframe embedding) |
+
+**Shareable link example:**
+
+```
+https://your-site.example/?data=https://data.example.com/run-42&binColor=partition&genomeColor=genus
+```
+
+**Embeddable iframe example:**
+
+```html
+<iframe
+  src="https://your-site.example/?data=https://data.example.com/run-42&embed=1"
+  style="width:100%;height:600px;border:0"
+  loading="lazy"></iframe>
+```
+
+The viewer's **Share & embed** panel exposes the current URL and a ready-made iframe snippet; any change to the data URL or color mappings is reflected in the browser's address bar so you can copy a link that reproduces the exact view.
+
+**CORS caveat:** the remote host must serve the `.arrow` files with `Access-Control-Allow-Origin` set for the viewer's origin. Hosting on the same origin as the viewer, on S3 with CORS enabled, or on GitHub Releases / Pages all work.
+
 ## Tech stack
 
 - **Python** — `pandas`, `python-igraph` (layout), `pyarrow`

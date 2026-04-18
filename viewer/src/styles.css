@@ -78,7 +78,9 @@ main {
   margin: 8px 0 4px;
 }
 
-#controls select {
+#controls select,
+#controls input,
+#controls textarea {
   width: 100%;
   background: var(--bg);
   color: var(--text);
@@ -86,6 +88,42 @@ main {
   border-radius: 4px;
   padding: 6px 8px;
   font-size: 13px;
+  font-family: inherit;
+}
+
+#controls textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+#controls button {
+  margin-top: 6px;
+  background: var(--accent);
+  color: #0d1117;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#controls button:hover {
+  filter: brightness(1.1);
+}
+
+#controls .hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+body.embed header,
+body.embed #controls {
+  display: none;
 }
 
 #controls .help ul {
