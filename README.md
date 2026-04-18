@@ -15,6 +15,30 @@ A static website that visualizes a [gig-map](https://github.com/FredHutch/gig-ma
 
 Hover for details; click and drag a node to watch neighbors respond with force-directed physics. Initial positions are precomputed in Python so the graph renders instantly and identically on every device.
 
+## Screenshots
+
+All captures use the bundled synthetic demo (80 genomes × 200 bins, core/shell/cloud partitions).
+
+**Overview — bipartite graph, sequential bin color by gene count.**
+
+![Overview](docs/screenshots/01-overview.png)
+
+**Categorical coloring — bins by `partition` (core / shell / cloud), genomes by `clade`.**
+
+![Categorical coloring](docs/screenshots/02-color-by-partition.png)
+
+**Lasso selection — Shift + drag to select nodes; the action bar offers *Keep only*, *Hide*, or *Cancel*.**
+
+![Lasso selection](docs/screenshots/03-lasso-selection.png)
+
+**Filter applied — sidebar shows `Keeping 167 / 280` and a red *Clear filter* button. The filter state is encoded into the URL hash for shareable links.**
+
+![Filter applied](docs/screenshots/04-filter-applied.png)
+
+**Search — matching labels pop; non-matching nodes fade, incident edges mute.**
+
+![Search highlight](docs/screenshots/05-search.png)
+
 ## Features
 
 - **WebGL rendering** via Sigma.js v3 — handles tens of thousands of nodes
@@ -223,6 +247,16 @@ viewer/src/
 5. Publishes `viewer/dist/` to GitHub Pages
 
 To deploy elsewhere, point any static host at the `viewer/dist/` output after `npm run build`.
+
+### Regenerating screenshots
+
+```bash
+npm run build --prefix viewer
+npm install --no-save puppeteer           # bundles a Chromium the script drives
+node scripts/capture_screenshots.mjs
+```
+
+Outputs land in `docs/screenshots/`. The script spins up a tiny static server over `viewer/dist/`, drives the viewer with the default demo, and captures the overview, categorical coloring, lasso selection, applied filter, and search states.
 
 ### Contributing
 
