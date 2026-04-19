@@ -33,8 +33,12 @@ export function createSigma(graph: Graph, container: HTMLElement): Sigma {
     labelGridCellSize: 80,
     labelRenderedSizeThreshold: 12,
     zIndex: true,
-    minCameraRatio: 0.05,
-    maxCameraRatio: 20,
+    minCameraRatio: 0.02,
+    maxCameraRatio: 40,
+    // Node "size" is in graph coordinates, so circles scale with zoom and
+    // never outgrow their hex cell regardless of camera ratio.
+    itemSizesReference: "positions",
+    zoomToSizeRatioFunction: (ratio) => ratio,
   });
   return renderer;
 }

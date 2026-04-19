@@ -6,7 +6,15 @@ export interface BuildResult {
   graph: Graph;
   binIds: string[];
   genomeIds: string[];
+  pitch: number;
 }
+
+// Node "size" is now interpreted in graph coordinates (itemSizesReference =
+// "positions" in render.ts), so every radius is a fraction of the hex pitch.
+// Keeping max radius ≤ 0.5 * pitch guarantees adjacent cells can never overlap.
+const BIN_MIN_RADIUS_FRAC = 0.12;
+const BIN_MAX_RADIUS_FRAC = 0.38;
+const GENOME_RADIUS_FRAC = 0.32;
 
 export function buildGraph(data: GraphData): BuildResult {
   const graph = new Graph({ type: "undirected", multi: false });
@@ -20,7 +28,7 @@ export function buildGraph(data: GraphData): BuildResult {
       kind: n.kind,
       x: n.x,
       y: n.y,
-      size: defaultSize(n),
+      size: 1,
       color: defaultColor(n),
       type: n.kind === "genome" ? "ring" : "circle",
       attrs: n.attrs,
@@ -39,16 +47,35 @@ export function buildGraph(data: GraphData): BuildResult {
     });
   }
 
-  applyHexLayout(graph);
+  const pitch = applyHexLayout(graph);
+  graph.setAttribute("hexPitch", pitch);
 
-  return { graph, binIds, genomeIds };
+  // Seed default sizes so the first render (pre-encoding) already respects
+  // the grid and nothing overlaps.
+  for (const n of data.nodes) {
+    graph.setNodeAttribute(n.id, "size", defaultSize(n, pitch));
+  }
+
+  return { graph, binIds, genomeIds, pitch };
 }
 
-function defaultSize(n: NodeRow): number {
-  if (n.kind === "genome") return 6;
+function defaultSize(n: NodeRow, pitch: number): number {
+  if (n.kind === "genome") return pitch * GENOME_RADIUS_FRAC;
   const nGenes = Number(n.attrs["n_genes"] ?? 1);
-  return 3 + Math.sqrt(Math.max(1, nGenes)) * 1.8;
+  // sqrt shape within the [min, max] band by default.
+  const normalized = Math.min(1, Math.sqrt(Math.max(1, nGenes)) / 20);
+  return (
+    pitch *
+    (BIN_MIN_RADIUS_FRAC +
+      (BIN_MAX_RADIUS_FRAC - BIN_MIN_RADIUS_FRAC) * normalized)
+  );
 }
+
+export const BIN_RADIUS_FRAC_RANGE = {
+  min: BIN_MIN_RADIUS_FRAC,
+  max: BIN_MAX_RADIUS_FRAC,
+};
+export const GENOME_RADIUS_FRAC_VALUE = GENOME_RADIUS_FRAC;
 
 function defaultColor(n: NodeRow): string {
   return n.kind === "genome" ? "#f0883e" : "#58a6ff";

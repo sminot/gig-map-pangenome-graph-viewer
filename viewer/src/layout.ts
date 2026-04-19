@@ -30,9 +30,9 @@ export interface HexLayoutOptions {
   timeBudgetMs?: number;
 }
 
-export function applyHexLayout(graph: Graph, options: HexLayoutOptions = {}): void {
+export function applyHexLayout(graph: Graph, options: HexLayoutOptions = {}): number {
   const nodes = graph.nodes();
-  if (nodes.length === 0) return;
+  if (nodes.length === 0) return options.pitch ?? 1;
 
   // Gather initial x/y hints — we prefer the preprocessor embedding when present
   // so the grid layout preserves coarse neighborhoods.
@@ -217,6 +217,7 @@ export function applyHexLayout(graph: Graph, options: HexLayoutOptions = {}): vo
     graph.setNodeAttribute(id, "y", y);
   }
 
+  return pitch;
 }
 
 function findEmptyNear(

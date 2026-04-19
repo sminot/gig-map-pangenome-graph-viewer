@@ -53,6 +53,10 @@ export function exportSVG(
   );
   parts.push(`<rect width="100%" height="100%" fill="#010409"/>`);
 
+  // Node sizes live in graph coordinates now; scale them into viewport pixels
+  // so the exported SVG matches the on-screen rendering at the current zoom.
+  const sizeRatio = sigma.getGraphToViewportRatio();
+
   parts.push(`<g stroke-linecap="round">`);
   graph.forEachEdge((_e, attrs, source, target) => {
     const a = sigma.graphToViewport({
@@ -75,14 +79,14 @@ export function exportSVG(
   graph.forEachNode((_n, attrs) => {
     const p = sigma.graphToViewport({ x: attrs.x, y: attrs.y });
     const color = attrs.color ?? "#58a6ff";
-    const size = attrs.size ?? 4;
+    const radius = Math.max(0.5, Number(attrs.size ?? 4) * sizeRatio);
     if (attrs.type === "ring") {
       parts.push(
-        `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${size.toFixed(2)}" fill="none" stroke="${escapeAttr(color)}" stroke-width="2"/>`,
+        `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${radius.toFixed(2)}" fill="none" stroke="${escapeAttr(color)}" stroke-width="2"/>`,
       );
     } else {
       parts.push(
-        `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${size.toFixed(2)}" fill="${escapeAttr(color)}"/>`,
+        `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${radius.toFixed(2)}" fill="${escapeAttr(color)}"/>`,
       );
     }
   });
