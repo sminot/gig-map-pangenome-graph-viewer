@@ -295,6 +295,12 @@ The script spins up a tiny static server over `viewer/dist/`, drives the viewer 
 
 Issues and PRs are welcome. Please run `npm run build` (which type-checks) and make sure the preprocessor CLI still succeeds against `demo-data/` before submitting. No formal linting or test suite yet — see the open issues for anything worth picking up.
 
+## Example methods text
+
+The following text can be adapted for the methods section of a journal article when citing a figure produced with this tool:
+
+> Pangenome structure was visualized using the gig-map Pangenome Graph Viewer (https://github.com/sminot/gig-map-pangenome-graph-viewer). Gene bins and genomes were represented as nodes in a bipartite graph; pairwise distances were computed as 1 − Jaccard similarity over shared genome neighborhoods (bin–bin and genome–genome pairs) or binary presence/absence (bin–genome pairs), projected to two dimensions via t-SNE, and snapped to a non-overlapping hexagonal grid. Node color encodes partition class (core/shell/cloud) for gene bins and [metadata attribute, e.g. taxonomic clade] for genomes.
+
 ## License
 
 [MIT](LICENSE)
