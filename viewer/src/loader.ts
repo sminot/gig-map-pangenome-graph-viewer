@@ -4,8 +4,6 @@ export interface NodeRow {
   id: string;
   kind: "bin" | "genome";
   label: string;
-  x: number;
-  y: number;
   attrs: Record<string, unknown>;
 }
 
@@ -33,6 +31,9 @@ export interface GraphData {
   info: DatasetInfo;
 }
 
+// Structural columns that aren't exposed as user-facing attributes. Older
+// preprocessor builds also wrote `x` and `y` — we drop those on load because
+// layout is recomputed in the browser.
 const STRUCTURAL_NODE_COLS = new Set(["id", "kind", "label", "x", "y"]);
 
 export async function loadGraph(baseUrl: string): Promise<GraphData> {
@@ -104,8 +105,6 @@ function tableToNodes(table: Table): NodeRow[] {
       id: String(record.id),
       kind: record.kind === "genome" ? "genome" : "bin",
       label: String(record.label ?? record.id),
-      x: Number(record.x ?? 0),
-      y: Number(record.y ?? 0),
       attrs,
     });
   }

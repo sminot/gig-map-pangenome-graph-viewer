@@ -15,7 +15,7 @@ A static website that visualizes a [gig-map](https://github.com/FredHutch/gig-ma
 - **Genome nodes** (unfilled rings) — input genomes; colored by user-supplied metadata (taxonomy / clade / etc.).
 - **Edges** — a genome contains that bin (from `prop_genes_detected` in gig-map output).
 
-Positions are precomputed by a **co-embed** layout: TF-IDF weighting on the genome × bin matrix, truncated SVD into a shared latent space, then t-SNE to 2D. Genomes with similar bin content cluster together, clade-specific shell bins co-locate with their clade, and ubiquitous core bins pool in the middle — you can see similarity groups as real 2D clusters instead of a hairball or a radial gradient. Hover for details; click and drag a node to watch neighbors respond with force-directed physics.
+Layout is computed **in the browser** from graph structure alone. Distances are bipartite-aware — `1 − Jaccard` between bins over their genome neighborhoods (and symmetrically for genomes), `0 / 1` between bins and genomes depending on edge presence — and run through t-SNE to give similarity groups as real 2D clusters instead of a hairball. The continuous embedding then snaps to a hexagonal grid so circles never overlap at any zoom. Hover for details; click and drag a node to watch it follow the cursor while its immediate neighbors are gently tugged along.
 
 ![Overview — bins colored by `partition` (core / shell / cloud), genomes by `clade`; five clades form five visibly separated clusters](docs/screenshots/overview.png)
 
@@ -25,7 +25,8 @@ Positions are precomputed by a **co-embed** layout: TF-IDF weighting on the geno
 - **Bipartite visual language** — filled circles for bins, unfilled rings for genomes, with independent palettes
 - **Live color encoding** — pick any attribute column (numeric → sequential palette; categorical → Okabe-Ito colorblind-safe)
 - **Bin size scale** — `linear`, `sqrt` (area-proportional), or `log`, with a built-in size legend
-- **Drag physics** — click and drag a node; neighbors spring around via a `graphology-layout-forceatlas2` worker
+- **Hex-grid layout** — every node lives on a unique pointy-top hex cell snapped from an in-browser t-SNE, so circles never overlap at any zoom
+- **Drag tug** — click and drag a node; it follows the cursor while its immediate neighbors are gently pulled along, no force-directed restructuring
 - **Three ways to load data** — bundled demo, remote URL (`?data=…`), or drag-and-drop the three `.arrow` files onto the canvas
 - **Search / highlight** — filter by label, matching nodes pop while the rest fade
 - **Lasso select + filter** — `Shift + drag` draws a lasso; keep only the selected nodes or hide them, with a one-click clear. Filter state compresses into the URL hash for shareable subsets.
@@ -36,8 +37,8 @@ Positions are precomputed by a **co-embed** layout: TF-IDF weighting on the geno
 ## Repository layout
 
 ```
-preprocess/    # Python: gig-map output -> nodes.arrow + edges.arrow + meta.arrow
-viewer/        # Vite + TypeScript static site (Sigma.js v3 + graphology + FA2)
+preprocess/    # Python: gig-map output -> nodes.arrow + edges.arrow + meta.arrow (structure only, no coords)
+viewer/        # Vite + TypeScript static site (Sigma.js v3 + graphology); computes layout in the browser
 scripts/       # demo-data generator
 demo-data/     # generated synthetic gig-map output (gitignored; regenerable)
 ```
@@ -159,8 +160,8 @@ If you'd rather not host the Arrow files anywhere, drop them directly onto the v
 
 ## Tech stack
 
-- **Python** — `pandas`, `numpy` + `scipy` + `scikit-learn` (SVD + t-SNE co-embed layout), `python-igraph` (fallback layouts), `pyarrow`
-- **Viewer** — `sigma` v3 (WebGL), `graphology`, `graphology-layout-forceatlas2`, `apache-arrow`
+- **Python** — `pandas`, `pyarrow` (graph-only; no numerical stack required)
+- **Viewer** — `sigma` v3 (WebGL), `graphology`, `@keckelt/tsne` (in-browser embedding), `apache-arrow`
 - **Build** — Vite + TypeScript (strict mode)
 
 ## Development guide
@@ -213,15 +214,16 @@ preprocess/preprocess/
   cli.py        # argparse entrypoint
   read.py       # fixed relative-path CSV reader; fails fast on missing files
   build.py      # bipartite bin<->genome graph + attribute derivation
-  layout.py     # co-embed layout (default: SVD + t-SNE on TF-IDF bipartite matrix); radial-spectral + python-igraph fallbacks; normalized to [-1, 1]
-  write.py      # three Apache Arrow IPC files (nodes/edges/meta)
+  write.py      # three Apache Arrow IPC files (nodes/edges/meta); no coordinates
 
 viewer/src/
   main.ts       # wiring: load -> install graph -> encoding, search, export, drag-drop
   loader.ts     # Arrow IPC decode (URL fetch + raw-buffer variants)
-  graph.ts      # graphology Graph construction from parsed data
+  graph.ts      # graphology Graph construction + layout pipeline wiring
+  embed.ts     # bipartite overlap distance matrix + t-SNE -> 2D positions
+  layout.ts    # snap the continuous embedding onto a non-overlapping hex grid
   render.ts     # Sigma.js setup + node programs (filled circle / ring)
-  physics.ts    # FA2 worker + click-drag neighbor-spring behavior
+  physics.ts    # click-drag that tugs immediate neighbors by a fraction of the drag delta
   encoding.ts   # attribute -> color/size mapping; emits legend metadata
   palettes.ts   # viridis, plasma, Okabe-Ito categorical
   search.ts     # label-substring search via Sigma node/edge reducers
@@ -247,6 +249,37 @@ https://<owner>.github.io/<repo>/pr-preview/pr-<N>/
 **One-time repo setup:** in **Settings → Pages**, set **Source** = *Deploy from a branch*, **Branch** = `gh-pages`, **Folder** = `/ (root)`. GitHub Pages then serves the most recent deploy (and any active PR previews) from that branch. The first deploy creates the branch automatically.
 
 To deploy elsewhere, point any static host at the `viewer/dist/` output after `npm run build`.
+
+### Porting the layout back to Python (notes for future work)
+
+Layout currently runs in the browser (`viewer/src/embed.ts` + `viewer/src/layout.ts`) because it keeps the preprocessor dependency-free and lets the viewer re-layout whenever a user drops in a new `.arrow` bundle. If a future dataset is large enough that the browser run starts to hurt, the same pipeline can be precomputed in Python and shipped as `x`/`y` columns on `nodes.arrow`.
+
+Algorithm, Python-side sketch:
+
+1. **Distance matrix (`N × N`).** `N = n_bins + n_genomes`. Fill symmetrically:
+
+   - `bin ↔ bin`: `1 − Jaccard(genomes_containing_a, genomes_containing_b)`
+   - `genome ↔ genome`: `1 − Jaccard(bins_in_a, bins_in_b)`
+   - `bin ↔ genome`: `0` if an edge exists, `1` otherwise
+
+   For sparse bipartite graphs this is straightforward with two adjacency dicts of `set[int]`; the Jaccard loop is ~`O(N² · avg_deg)` but can be replaced by a sparse boolean matrix product if `N` gets large.
+
+2. **t-SNE.** Feed the matrix to `sklearn.manifold.TSNE(metric="precomputed", init="random", perplexity=min(50, sqrt(N)))` to get `(N, 2)` coordinates. Seed via `random_state` if you want reproducibility across deploys.
+
+3. **Hex snap.** Pitch is picked so `cell_area = sqrt(3)/2 · pitch² ≈ bbox_area / N · 1.15`, i.e. `pitch = sqrt(2 · area / (sqrt(3) · N)) · 1.15`. Use pointy-top axial coordinates with the same forward / inverse formulas as `layout.ts`:
+
+   ```
+   x = pitch · (q + r/2)
+   y = pitch · sqrt(3)/2 · r
+   ```
+
+   Snap each node to its nearest axial cell via cube-rounding. Process nodes in order of ideal-cell crowding (uncontested ideal cells first) and spiral outward to the nearest empty cell on collisions.
+
+4. **Local swap refinement.** A few passes (≤30) over the node set: for each node, consider the cells within ring-radius 3; take the move (into an empty cell) or swap (with an occupying node) that most reduces the summed Euclidean distance from each node to its t-SNE position. Stop when a pass produces no improvement.
+
+5. **Ship.** Merge the `(id, x, y)` dataframe back into `graph.nodes` before `write_graph` and restore the `x`/`y` pass-through in `viewer/src/loader.ts` / `viewer/src/graph.ts` (behind a check — fall back to in-browser embed when the columns are missing so both schemas stay supported).
+
+The JS reference in `viewer/src/embed.ts` and `viewer/src/layout.ts` is short (~300 lines combined) and directly maps to numpy/pandas; the refinement is the only non-obvious part (displacement-minimizing local swaps).
 
 ### Regenerating screenshots
 

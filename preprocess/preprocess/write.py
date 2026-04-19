@@ -1,4 +1,8 @@
-"""Serialize the bipartite graph + layout to Apache Arrow IPC files."""
+"""Serialize the bipartite graph to Apache Arrow IPC files.
+
+No node coordinates are written — layout is computed in the browser from
+graph structure alone (see ``viewer/src/embed.ts`` and ``viewer/src/layout.ts``).
+"""
 
 from __future__ import annotations
 
@@ -17,29 +21,30 @@ META_FILE = "meta.arrow"
 
 def write_graph(
     graph: Graph,
-    layout: pd.DataFrame,
     out_dir: Path,
     title: str | None = None,
     description: str | None = None,
 ) -> None:
-    """Write nodes.arrow, edges.arrow, and meta.arrow into `out_dir`.
+    """Write nodes.arrow, edges.arrow, and meta.arrow into ``out_dir``.
 
     Three files keep the wire format simple (one IPC stream per schema) and
-    let the browser fetch them in parallel. `title` / `description` are
+    let the browser fetch them in parallel. ``title`` / ``description`` are
     attached to meta.arrow as Arrow schema metadata so the viewer can display
     dataset identity without a separate file.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    nodes = graph.nodes.merge(layout, on="id", how="left")
-    nodes["x"] = nodes["x"].fillna(0).astype("float32")
-    nodes["y"] = nodes["y"].fillna(0).astype("float32")
+    _write_table(
+        pa.Table.from_pandas(graph.nodes, preserve_index=False),
+        out_dir / NODES_FILE,
+    )
+    _write_table(
+        pa.Table.from_pandas(graph.edges, preserve_index=False),
+        out_dir / EDGES_FILE,
+    )
 
-    _write_table(pa.Table.from_pandas(nodes, preserve_index=False), out_dir / NODES_FILE)
-    _write_table(pa.Table.from_pandas(graph.edges, preserve_index=False), out_dir / EDGES_FILE)
-
-    meta = _build_meta_table(graph, nodes)
+    meta = _build_meta_table(graph, graph.nodes)
     schema_meta: dict[bytes, bytes] = {}
     if title:
         schema_meta[b"title"] = title.encode("utf-8")

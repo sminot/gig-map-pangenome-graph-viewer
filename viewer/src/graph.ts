@@ -31,11 +31,13 @@ export function buildGraph(
   const genomeIds: string[] = [];
 
   for (const n of data.nodes) {
+    // x/y get assigned by applyHexLayout below; seed with 0 so graphology
+    // has a numeric value if Sigma inspects the attribute before layout runs.
     graph.addNode(n.id, {
       label: n.label,
       kind: n.kind,
-      x: n.x,
-      y: n.y,
+      x: 0,
+      y: 0,
       size: 1,
       color: defaultColor(n),
       type: n.kind === "genome" ? "ring" : "circle",
