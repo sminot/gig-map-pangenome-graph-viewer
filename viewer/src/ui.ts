@@ -40,27 +40,63 @@ function fillSelect(
 
 export function attachTooltip(
   sigma: Sigma,
-  graph: Graph,
+  _graph: Graph,
   nodesById: Map<string, NodeRow>,
-): void {
+): () => void {
   const tooltip = document.getElementById("tooltip") as HTMLDivElement;
+  const container = sigma.getContainer();
+  let hideTimer: number | undefined;
 
-  sigma.on("enterNode", ({ node }) => {
+  const showAt = (node: string, clientX: number, clientY: number) => {
     const n = nodesById.get(node);
     if (!n) return;
     tooltip.innerHTML = formatTooltip(n);
+    tooltip.style.left = `${clientX + 12}px`;
+    tooltip.style.top = `${clientY + 12}px`;
     tooltip.classList.remove("hidden");
-  });
+  };
 
-  sigma.on("leaveNode", () => {
+  const hide = () => {
     tooltip.classList.add("hidden");
-  });
+    if (hideTimer !== undefined) {
+      window.clearTimeout(hideTimer);
+      hideTimer = undefined;
+    }
+  };
 
-  sigma.getContainer().addEventListener("mousemove", (ev: MouseEvent) => {
+  const onEnter = ({ node, event }: { node: string; event: { x: number; y: number } }) => {
+    const rect = container.getBoundingClientRect();
+    showAt(node, rect.left + event.x, rect.top + event.y);
+    // On touch there's no leaveNode; auto-hide after a short window so the
+    // tooltip doesn't linger forever after a tap.
+    if (hideTimer !== undefined) window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(hide, 2500);
+  };
+
+  const onLeave = () => hide();
+  const onStageDown = () => hide();
+
+  // Pointer events cover both mouse and touch, so the tooltip tracks fingers
+  // as well as cursors.
+  const onPointerMove = (ev: PointerEvent) => {
     if (tooltip.classList.contains("hidden")) return;
     tooltip.style.left = `${ev.clientX + 12}px`;
     tooltip.style.top = `${ev.clientY + 12}px`;
-  });
+  };
+
+  sigma.on("enterNode", onEnter);
+  sigma.on("leaveNode", onLeave);
+  sigma.on("downStage", onStageDown);
+  container.addEventListener("pointermove", onPointerMove);
+
+  return () => {
+    sigma.off("enterNode", onEnter);
+    sigma.off("leaveNode", onLeave);
+    sigma.off("downStage", onStageDown);
+    container.removeEventListener("pointermove", onPointerMove);
+    if (hideTimer !== undefined) window.clearTimeout(hideTimer);
+    hide();
+  };
 }
 
 function formatTooltip(n: NodeRow): string {

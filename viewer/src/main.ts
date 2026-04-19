@@ -172,7 +172,9 @@ async function main() {
   let detachPhysics: (() => void) | null = null;
   let detachLasso: (() => void) | null = null;
   let detachSearch: (() => void) | null = null;
+  let detachTooltip: (() => void) | null = null;
   let interactions: InteractionHandle | null = null;
+  let loadToken = 0;
   let filter: FilterState | null = decodeFilter(window.location.hash);
   let pinned: Set<string> = decodePinned(window.location.hash);
   let pendingSelection: string[] = [];
@@ -300,6 +302,10 @@ async function main() {
       detachSearch();
       detachSearch = null;
     }
+    if (detachTooltip) {
+      detachTooltip();
+      detachTooltip = null;
+    }
     if (interactions) {
       interactions.detach();
       interactions = null;
@@ -314,7 +320,7 @@ async function main() {
     const nodesById = new Map<string, NodeRow>(data.nodes.map((n) => [n.id, n]));
 
     sigma = createSigma(graph, container);
-    attachTooltip(sigma, graph, nodesById);
+    detachTooltip = attachTooltip(sigma, graph, nodesById);
     interactions = attachInteractions(sigma, graph, {
       edgesAlwaysOn: edgesAlwaysOnInput.checked,
       edgeOpacity: Number(edgesOpacityInput.value) / 100,
@@ -354,19 +360,31 @@ async function main() {
 
   const initialUrl = params.data ?? DEFAULT_DATA_URL;
   status.textContent = `Loading ${initialUrl}…`;
-  installGraph(await loadGraph(initialUrl), initialUrl);
+  const initialToken = ++loadToken;
+  const initialData = await loadGraph(initialUrl);
+  if (initialToken === loadToken) {
+    installGraph(initialData, initialUrl);
+  }
 
   binColorSel.addEventListener("change", refresh);
   genomeColorSel.addEventListener("change", refresh);
   binPaletteSel.addEventListener("change", refresh);
   binSizeScaleSel.addEventListener("change", refresh);
 
+  // loadToken tags the latest requested load; any callback whose token is no
+  // longer current (because the user triggered another load meanwhile) bails
+  // out before mutating the graph. Prevents the double-click / drop-while-
+  // loading race where the older fetch can win against the newer one.
   const reload = async () => {
     const url = dataUrlInput.value.trim() || DEFAULT_DATA_URL;
+    const myToken = ++loadToken;
     status.textContent = `Loading ${url}…`;
     try {
-      installGraph(await loadGraph(url), url);
+      const data = await loadGraph(url);
+      if (myToken !== loadToken) return;
+      installGraph(data, url);
     } catch (err) {
+      if (myToken !== loadToken) return;
       status.textContent = `Error loading ${url}: ${err instanceof Error ? err.message : String(err)}`;
       console.error(err);
     }
@@ -381,6 +399,7 @@ async function main() {
     container,
     dropOverlay,
     (next, src) => {
+      loadToken++;
       filter = null;
       installGraph(next, src);
     },

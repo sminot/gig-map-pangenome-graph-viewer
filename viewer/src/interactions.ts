@@ -76,6 +76,10 @@ export function attachInteractions(
   sigma.on("leaveNode", onLeave);
   sigma.on("clickNode", onClickNode);
 
+  // NOTE: this module is the sole owner of sigma's node/edge reducers —
+  // sigma only stores one function per key, so if another module also calls
+  // setSetting("nodeReducer"|"edgeReducer") the state below is silently
+  // overridden. Keep all per-render styling decisions in this file.
   sigma.setSetting("nodeReducer", (node, attrs) => {
     const pinned = state.pinned.has(node);
     const searching = state.search.size > 0;
