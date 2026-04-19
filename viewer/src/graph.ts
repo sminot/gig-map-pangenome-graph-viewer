@@ -1,6 +1,7 @@
 import Graph from "graphology";
 import type { GraphData, NodeRow } from "./loader";
 import { applyHexLayout } from "./layout";
+import { embedNodes } from "./embed";
 
 export interface BuildResult {
   graph: Graph;
@@ -16,7 +17,14 @@ const BIN_MIN_RADIUS_FRAC = 0.12;
 const BIN_MAX_RADIUS_FRAC = 0.38;
 const GENOME_RADIUS_FRAC = 0.32;
 
-export function buildGraph(data: GraphData): BuildResult {
+export interface BuildOptions {
+  onProgress?: (stage: string, fraction: number) => void;
+}
+
+export function buildGraph(
+  data: GraphData,
+  options: BuildOptions = {},
+): BuildResult {
   const graph = new Graph({ type: "undirected", multi: false });
 
   const binIds: string[] = [];
@@ -47,8 +55,15 @@ export function buildGraph(data: GraphData): BuildResult {
     });
   }
 
-  const pitch = applyHexLayout(graph);
+  // Re-embed in 2D using bipartite-aware overlap distances, then snap the
+  // continuous embedding onto a non-overlapping hex grid.
+  const embedding = embedNodes(graph, {
+    onProgress: (f) => options.onProgress?.("Embedding", f),
+  });
+  options.onProgress?.("Snapping", 0);
+  const pitch = applyHexLayout(graph, embedding);
   graph.setAttribute("hexPitch", pitch);
+  options.onProgress?.("Snapping", 1);
 
   // Seed default sizes so the first render (pre-encoding) already respects
   // the grid and nothing overlaps.

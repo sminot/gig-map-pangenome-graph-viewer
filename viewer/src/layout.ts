@@ -1,12 +1,9 @@
 import type Graph from "graphology";
-import louvain from "graphology-communities-louvain";
 
 /**
- * Place every node on a unique pointy-top hexagonal cell. Louvain community
- * detection partitions the graph into clusters (respecting connected
- * components — Louvain never merges across them), each cluster is laid out
- * on its own grid, and clusters are shelf-packed with a visible gap so
- * biological clades appear as distinct islands rather than one hairball.
+ * Snap a continuous 2D embedding (one position per node) to a unique
+ * pointy-top hexagonal cell, picking the grid pitch so most nodes don't have
+ * to move far, and resolving collisions to minimize total displacement.
  *
  * Axial coordinates (q, r) map to cartesian as:
  *   x = pitch * (q + r / 2)
@@ -16,298 +13,149 @@ import louvain from "graphology-communities-louvain";
 
 type Axial = { q: number; r: number };
 
-interface Edge {
-  source: string;
-  target: string;
-  weight: number;
+export interface HexSnapInput {
+  ids: string[];
+  positions: { x: number; y: number }[];
 }
 
-export interface HexLayoutOptions {
+export interface HexSnapOptions {
   /** Override the auto-computed cell pitch (graph units). */
   pitch?: number;
-  /** Max refinement passes per cluster. Default 40. */
-  maxPasses?: number;
-  /** Search radius (in hex rings) for swap candidates. Default 2. */
+  /** Search radius (in hex rings) for displacement-reducing swaps. Default 3. */
   searchRadius?: number;
-  /** Hard time budget for refinement across all clusters, in ms. */
+  /** Max refinement passes. Default 30. */
+  maxPasses?: number;
+  /** Hard time budget for refinement, in ms. Default 1500. */
   timeBudgetMs?: number;
-  /** Empty-cell gap (in hex cells) between packed clusters. Default 3. */
-  componentGap?: number;
-  /** Louvain resolution: >1 = more/smaller clusters, <1 = fewer/larger. */
-  clusterResolution?: number;
-}
-
-interface ComponentLayout {
-  nodeIds: string[];
-  positions: Map<string, { x: number; y: number }>;
-  width: number;
-  height: number;
-  minX: number;
-  minY: number;
 }
 
 const SQRT3 = Math.sqrt(3);
 
 export function applyHexLayout(
   graph: Graph,
-  options: HexLayoutOptions = {},
+  embedding: HexSnapInput,
+  options: HexSnapOptions = {},
 ): number {
-  const allNodes = graph.nodes();
-  if (allNodes.length === 0) return options.pitch ?? 1;
+  const ids = embedding.ids;
+  const positions = embedding.positions;
+  const N = ids.length;
+  if (N === 0) return options.pitch ?? 1;
 
-  const { pitch, hints, centerX, centerY } = gatherHints(graph, allNodes, options);
-  const axialToXY = (cell: Axial) => ({
-    x: pitch * (cell.q + cell.r / 2),
-    y: pitch * (SQRT3 / 2) * cell.r,
-  });
+  // Pitch heuristic: enough cell area so all N points fit in roughly the same
+  // bounding box as the embedding, with a small inflation so even crowded
+  // regions usually find their nearest cell empty.
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of positions) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const w = Math.max(1e-6, maxX - minX);
+  const h = Math.max(1e-6, maxY - minY);
+  const area = w * h;
+  // Hex cell area = sqrt(3)/2 * pitch^2. Solve for pitch given area / N cells,
+  // then inflate slightly (1.15) so collisions are the exception.
+  const autoPitch = Math.sqrt((2 * area) / (SQRT3 * N)) * 1.15;
+  const pitch = options.pitch ?? Math.max(autoPitch, 1e-6);
+
   const xyToAxial = (x: number, y: number): Axial => {
     const qf = (x - y / SQRT3) / pitch;
     const rf = y / ((SQRT3 / 2) * pitch);
     return axialRound(qf, rf);
   };
-
-  const clusters = findClusters(graph, options.clusterResolution ?? 1);
-
-  // Share the time budget across clusters, weighted by node count.
-  const totalBudget = options.timeBudgetMs ?? 1500;
-  const layouts: ComponentLayout[] = clusters.map((comp) => {
-    const share = Math.max(
-      50,
-      Math.round((totalBudget * comp.length) / allNodes.length),
-    );
-    return layoutComponent(
-      graph,
-      comp,
-      hints,
-      centerX,
-      centerY,
-      axialToXY,
-      xyToAxial,
-      {
-        maxPasses: options.maxPasses ?? 40,
-        searchRadius: options.searchRadius ?? 2,
-        timeBudgetMs: share,
-      },
-    );
+  const axialToXY = (cell: Axial) => ({
+    x: pitch * (cell.q + cell.r / 2),
+    y: pitch * (SQRT3 / 2) * cell.r,
   });
 
-  // Largest islands first — gives the packer a stable, predictable shape.
-  layouts.sort((a, b) => b.nodeIds.length - a.nodeIds.length);
+  // Center the embedding so the hex grid is also centered on origin.
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const desired: { x: number; y: number }[] = positions.map((p) => ({
+    x: p.x - cx,
+    y: p.y - cy,
+  }));
 
-  const gap = Math.max(1, options.componentGap ?? 3) * pitch;
-  const offsets = shelfPack(layouts, gap);
+  // Pre-compute each node's ideal axial cell.
+  const idealCell: Axial[] = desired.map((p) => xyToAxial(p.x, p.y));
 
-  for (let i = 0; i < layouts.length; i++) {
-    const layout = layouts[i];
-    const { dx, dy } = offsets[i];
-    for (const id of layout.nodeIds) {
-      const p = layout.positions.get(id)!;
-      graph.setNodeAttribute(id, "x", p.x + dx);
-      graph.setNodeAttribute(id, "y", p.y + dy);
-    }
+  // Process in order of ideal-cell crowding: nodes whose ideal cell is
+  // uncontested go first (they get their preferred cell free); nodes in
+  // crowded ideal cells are placed last, when more cells are filled, but with
+  // the spiral guaranteeing uniqueness. This keeps the average displacement
+  // low without an expensive global assignment.
+  const idealKeyCounts = new Map<string, number>();
+  for (const c of idealCell) {
+    const k = cellKey(c);
+    idealKeyCounts.set(k, (idealKeyCounts.get(k) ?? 0) + 1);
   }
-
-  return pitch;
-}
-
-function gatherHints(
-  graph: Graph,
-  nodes: string[],
-  options: HexLayoutOptions,
-): {
-  pitch: number;
-  hints: Map<string, { x: number; y: number }>;
-  centerX: number;
-  centerY: number;
-} {
-  const hints = new Map<string, { x: number; y: number }>();
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let haveFinite = false;
-  for (const id of nodes) {
-    const x = Number(graph.getNodeAttribute(id, "x"));
-    const y = Number(graph.getNodeAttribute(id, "y"));
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      hints.set(id, { x, y });
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-      haveFinite = true;
-    }
-  }
-  if (!haveFinite) {
-    minX = 0;
-    minY = 0;
-    maxX = 1;
-    maxY = 1;
-  }
-  const diag = Math.hypot(maxX - minX, maxY - minY);
-  const autoPitch = diag > 0 ? (diag / Math.sqrt(nodes.length)) * 0.95 : 1;
-  const pitch = options.pitch ?? Math.max(autoPitch, 1e-6);
-  return {
-    pitch,
-    hints,
-    centerX: (minX + maxX) / 2,
-    centerY: (minY + maxY) / 2,
-  };
-}
-
-/**
- * Partition the graph into clusters by running Louvain community detection.
- * Isolated nodes and nodes in empty communities are each wrapped in a
- * one-node cluster so they still get laid out.
- */
-function findClusters(graph: Graph, resolution: number): string[][] {
-  if (graph.order === 0) return [];
-  const assignment: Record<string, number> =
-    graph.size > 0
-      ? louvain(graph, { getEdgeWeight: "weight", resolution })
-      : {};
-
-  const byCommunity = new Map<number, string[]>();
-  let nextSingletonId = 1_000_000_000;
-  for (const id of graph.nodes()) {
-    const raw = assignment[id];
-    const community = Number.isFinite(raw) ? raw : nextSingletonId++;
-    let bucket = byCommunity.get(community);
-    if (!bucket) {
-      bucket = [];
-      byCommunity.set(community, bucket);
-    }
-    bucket.push(id);
-  }
-  return [...byCommunity.values()];
-}
-
-function layoutComponent(
-  graph: Graph,
-  nodeIds: string[],
-  hints: Map<string, { x: number; y: number }>,
-  centerX: number,
-  centerY: number,
-  axialToXY: (c: Axial) => { x: number; y: number },
-  xyToAxial: (x: number, y: number) => Axial,
-  options: { maxPasses: number; searchRadius: number; timeBudgetMs: number },
-): ComponentLayout {
-  const member = new Set(nodeIds);
-
-  // Component-local hints: recenter on the centroid of this component's hints
-  // so its cells cluster near the axial origin, independent of where the
-  // full-graph hint cloud lives.
-  let hintCX = 0;
-  let hintCY = 0;
-  let hintCount = 0;
-  for (const id of nodeIds) {
-    const h = hints.get(id);
-    if (h) {
-      hintCX += h.x;
-      hintCY += h.y;
-      hintCount++;
-    }
-  }
-  if (hintCount > 0) {
-    hintCX /= hintCount;
-    hintCY /= hintCount;
-  } else {
-    hintCX = centerX;
-    hintCY = centerY;
-  }
-
-  // Place high-degree nodes first so the component's hub gets its preferred
-  // cell; leaves spiral around them.
-  const sorted = [...nodeIds].sort(
-    (a, b) => graph.degree(b) - graph.degree(a) || (a < b ? -1 : 1),
-  );
-
-  const cellKey = (c: Axial) => `${c.q},${c.r}`;
-  const cellToNode = new Map<string, string>();
-  const nodeToCell = new Map<string, Axial>();
-
-  for (const id of sorted) {
-    const h = hints.get(id) ?? { x: hintCX, y: hintCY };
-    const desired = xyToAxial(h.x - hintCX, h.y - hintCY);
-    const cell = findEmptyNear(desired, cellToNode);
-    cellToNode.set(cellKey(cell), id);
-    nodeToCell.set(id, cell);
-  }
-
-  // Edge table for this component only.
-  const edgesByNode = new Map<string, Edge[]>();
-  for (const id of nodeIds) edgesByNode.set(id, []);
-  graph.forEachEdge((_eid, attrs, source, target) => {
-    if (!member.has(source) || !member.has(target)) return;
-    const w = Number(attrs.weight);
-    const weight = Number.isFinite(w) && w > 0 ? w : 1;
-    const entry: Edge = { source, target, weight };
-    edgesByNode.get(source)!.push(entry);
-    edgesByNode.get(target)!.push(entry);
+  const order = [...Array(N).keys()].sort((a, b) => {
+    const ca = idealKeyCounts.get(cellKey(idealCell[a]))!;
+    const cb = idealKeyCounts.get(cellKey(idealCell[b]))!;
+    if (ca !== cb) return ca - cb;
+    // Tiebreak: nodes farther from the center of their ideal cell go later
+    // (their preference is weaker, so it's fine to displace them).
+    const da = displacement(desired[a], idealCell[a], pitch);
+    const db = displacement(desired[b], idealCell[b], pitch);
+    return da - db;
   });
 
-  const otherEnd = (edge: Edge, self: string): string =>
-    edge.source === self ? edge.target : edge.source;
+  const cellToIndex = new Map<string, number>();
+  const indexToCell: Axial[] = new Array(N);
+  for (const i of order) {
+    const cell = findEmptyNear(idealCell[i], cellToIndex);
+    cellToIndex.set(cellKey(cell), i);
+    indexToCell[i] = cell;
+  }
 
-  const hexDist = (a: Axial, b: Axial): number => {
-    const dq = a.q - b.q;
-    const dr = a.r - b.r;
-    return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
-  };
-
-  const costOf = (node: string, cell: Axial): number => {
-    let sum = 0;
-    for (const edge of edgesByNode.get(node) ?? []) {
-      const other = otherEnd(edge, node);
-      const otherCell = nodeToCell.get(other);
-      if (!otherCell) continue;
-      sum += hexDist(cell, otherCell) * edge.weight;
-    }
-    return sum;
-  };
-
-  const ringOffsets = ringsUpTo(options.searchRadius);
+  // Refinement: minimize total displacement by swapping/moving within a small
+  // hex-ring neighborhood. Cheap because each iteration is local.
+  const searchRadius = options.searchRadius ?? 3;
+  const maxPasses = options.maxPasses ?? 30;
+  const timeBudgetMs = options.timeBudgetMs ?? 1500;
+  const ringOffsets = ringsUpTo(searchRadius);
   const start = now();
-  for (let pass = 0; pass < options.maxPasses; pass++) {
+
+  const dispOf = (i: number, cell: Axial) =>
+    displacement(desired[i], cell, pitch);
+
+  for (let pass = 0; pass < maxPasses; pass++) {
     let improvements = 0;
-    for (const node of sorted) {
-      if (now() - start > options.timeBudgetMs) break;
-      const currentCell = nodeToCell.get(node)!;
-      const currentCost = costOf(node, currentCell);
+    for (let i = 0; i < N; i++) {
+      if (now() - start > timeBudgetMs) break;
+      const cell = indexToCell[i];
+      const cur = dispOf(i, cell);
 
       let bestGain = 1e-9;
       let bestTarget: Axial | null = null;
-      let bestSwap: string | null = null;
+      let bestSwap = -1;
 
-      for (const offset of ringOffsets) {
-        const candidate: Axial = {
-          q: currentCell.q + offset.q,
-          r: currentCell.r + offset.r,
-        };
-        const key = cellKey(candidate);
-        const occupant = cellToNode.get(key);
-        if (occupant === node) continue;
+      for (const off of ringOffsets) {
+        const cand: Axial = { q: cell.q + off.q, r: cell.r + off.r };
+        const ck = cellKey(cand);
+        const occupant = cellToIndex.get(ck);
+        if (occupant === i) continue;
 
-        if (!occupant) {
-          const newCost = costOf(node, candidate);
-          const gain = currentCost - newCost;
+        if (occupant === undefined) {
+          const gain = cur - dispOf(i, cand);
           if (gain > bestGain) {
             bestGain = gain;
-            bestTarget = candidate;
-            bestSwap = null;
+            bestTarget = cand;
+            bestSwap = -1;
           }
         } else {
-          const otherCurrent = costOf(occupant, candidate);
-          nodeToCell.set(node, candidate);
-          nodeToCell.set(occupant, currentCell);
-          const newSelf = costOf(node, candidate);
-          const newOther = costOf(occupant, currentCell);
-          nodeToCell.set(node, currentCell);
-          nodeToCell.set(occupant, candidate);
-          const gain = currentCost + otherCurrent - newSelf - newOther;
+          const otherCell = indexToCell[occupant];
+          const otherCur = dispOf(occupant, otherCell);
+          const newSelf = dispOf(i, cand);
+          const newOther = dispOf(occupant, cell);
+          const gain = cur + otherCur - newSelf - newOther;
           if (gain > bestGain) {
             bestGain = gain;
-            bestTarget = candidate;
+            bestTarget = cand;
             bestSwap = occupant;
           }
         }
@@ -315,110 +163,62 @@ function layoutComponent(
 
       if (bestTarget) {
         const targetKey = cellKey(bestTarget);
-        const currentKey = cellKey(currentCell);
-        if (bestSwap) {
-          nodeToCell.set(node, bestTarget);
-          nodeToCell.set(bestSwap, currentCell);
-          cellToNode.set(targetKey, node);
-          cellToNode.set(currentKey, bestSwap);
+        const currentKey = cellKey(cell);
+        if (bestSwap >= 0) {
+          indexToCell[i] = bestTarget;
+          indexToCell[bestSwap] = cell;
+          cellToIndex.set(targetKey, i);
+          cellToIndex.set(currentKey, bestSwap);
         } else {
-          nodeToCell.set(node, bestTarget);
-          cellToNode.delete(currentKey);
-          cellToNode.set(targetKey, node);
+          indexToCell[i] = bestTarget;
+          cellToIndex.delete(currentKey);
+          cellToIndex.set(targetKey, i);
         }
         improvements++;
       }
     }
     if (improvements === 0) break;
-    if (now() - start > options.timeBudgetMs) break;
+    if (now() - start > timeBudgetMs) break;
   }
 
-  // Convert to XY and compute bounding box.
-  const positions = new Map<string, { x: number; y: number }>();
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const id of nodeIds) {
-    const cell = nodeToCell.get(id)!;
-    const xy = axialToXY(cell);
-    positions.set(id, xy);
-    if (xy.x < minX) minX = xy.x;
-    if (xy.y < minY) minY = xy.y;
-    if (xy.x > maxX) maxX = xy.x;
-    if (xy.y > maxY) maxY = xy.y;
+  // Commit absolute positions back onto the graph.
+  for (let i = 0; i < N; i++) {
+    const xy = axialToXY(indexToCell[i]);
+    graph.setNodeAttribute(ids[i], "x", xy.x);
+    graph.setNodeAttribute(ids[i], "y", xy.y);
   }
-  return {
-    nodeIds,
-    positions,
-    width: maxX - minX,
-    height: maxY - minY,
-    minX,
-    minY,
-  };
+
+  return pitch;
 }
 
-/**
- * Next-fit-decreasing-height shelf packing. Components are arranged left to
- * right into rows; a new row starts when the current shelf would exceed a
- * square-ish target width. Simple, deterministic, and good enough for the
- * island-of-islands aesthetic.
- */
-function shelfPack(
-  layouts: ComponentLayout[],
-  gap: number,
-): { dx: number; dy: number }[] {
-  const totalArea = layouts.reduce(
-    (s, l) => s + (l.width + gap) * (l.height + gap),
-    0,
-  );
-  const targetWidth = Math.sqrt(Math.max(totalArea, 1)) * 1.2;
-
-  const offsets: { dx: number; dy: number }[] = new Array(layouts.length);
-  let shelfY = 0;
-  let shelfHeight = 0;
-  let cursorX = 0;
-  let shelfFirst = true;
-
-  for (let i = 0; i < layouts.length; i++) {
-    const l = layouts[i];
-    const w = l.width;
-    const h = l.height;
-
-    if (!shelfFirst && cursorX + w > targetWidth) {
-      // Wrap to the next shelf.
-      shelfY += shelfHeight + gap;
-      cursorX = 0;
-      shelfHeight = 0;
-      shelfFirst = true;
-    }
-
-    // Translate so the component's local min-corner lands at (cursorX, shelfY).
-    offsets[i] = { dx: cursorX - l.minX, dy: shelfY - l.minY };
-    cursorX += w + gap;
-    if (h > shelfHeight) shelfHeight = h;
-    shelfFirst = false;
-  }
-  return offsets;
+function displacement(
+  p: { x: number; y: number },
+  cell: Axial,
+  pitch: number,
+): number {
+  const cx = pitch * (cell.q + cell.r / 2);
+  const cy = pitch * (SQRT3 / 2) * cell.r;
+  const dx = p.x - cx;
+  const dy = p.y - cy;
+  return Math.hypot(dx, dy);
 }
 
-function now(): number {
-  return typeof performance !== "undefined" ? performance.now() : Date.now();
+function cellKey(c: Axial): string {
+  return `${c.q},${c.r}`;
 }
 
 function findEmptyNear(
   desired: Axial,
-  cellToNode: Map<string, string>,
+  cellToIndex: Map<string, number>,
 ): Axial {
-  const key = (c: Axial) => `${c.q},${c.r}`;
-  if (!cellToNode.has(key(desired))) return desired;
+  if (!cellToIndex.has(cellKey(desired))) return desired;
   for (let radius = 1; radius < 10_000; radius++) {
     for (const offset of ringAt(radius)) {
       const candidate: Axial = {
         q: desired.q + offset.q,
         r: desired.r + offset.r,
       };
-      if (!cellToNode.has(key(candidate))) return candidate;
+      if (!cellToIndex.has(cellKey(candidate))) return candidate;
     }
   }
   return desired;
@@ -470,4 +270,8 @@ function axialRound(qf: number, rf: number): Axial {
   else if (dy > dz) ry = -rx - rz;
   else rz = -rx - ry;
   return { q: rx, r: rz };
+}
+
+function now(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
