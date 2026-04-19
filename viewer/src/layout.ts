@@ -1,9 +1,12 @@
 import type Graph from "graphology";
+import louvain from "graphology-communities-louvain";
 
 /**
- * Place every node on a unique pointy-top hexagonal cell. Connected components
- * are laid out independently, then shelf-packed with a visible gap between
- * them so disjoint sub-graphs appear as distinct islands.
+ * Place every node on a unique pointy-top hexagonal cell. Louvain community
+ * detection partitions the graph into clusters (respecting connected
+ * components — Louvain never merges across them), each cluster is laid out
+ * on its own grid, and clusters are shelf-packed with a visible gap so
+ * biological clades appear as distinct islands rather than one hairball.
  *
  * Axial coordinates (q, r) map to cartesian as:
  *   x = pitch * (q + r / 2)
@@ -22,14 +25,16 @@ interface Edge {
 export interface HexLayoutOptions {
   /** Override the auto-computed cell pitch (graph units). */
   pitch?: number;
-  /** Max refinement passes per component. Default 40. */
+  /** Max refinement passes per cluster. Default 40. */
   maxPasses?: number;
   /** Search radius (in hex rings) for swap candidates. Default 2. */
   searchRadius?: number;
-  /** Hard time budget for refinement across all components, in ms. */
+  /** Hard time budget for refinement across all clusters, in ms. */
   timeBudgetMs?: number;
-  /** Empty-cell gap (in hex cells) between packed components. Default 3. */
+  /** Empty-cell gap (in hex cells) between packed clusters. Default 3. */
   componentGap?: number;
+  /** Louvain resolution: >1 = more/smaller clusters, <1 = fewer/larger. */
+  clusterResolution?: number;
 }
 
 interface ComponentLayout {
@@ -61,11 +66,11 @@ export function applyHexLayout(
     return axialRound(qf, rf);
   };
 
-  const components = findComponents(graph);
+  const clusters = findClusters(graph, options.clusterResolution ?? 1);
 
-  // Share the time budget across components, weighted by node count.
+  // Share the time budget across clusters, weighted by node count.
   const totalBudget = options.timeBudgetMs ?? 1500;
-  const layouts: ComponentLayout[] = components.map((comp) => {
+  const layouts: ComponentLayout[] = clusters.map((comp) => {
     const share = Math.max(
       50,
       Math.round((totalBudget * comp.length) / allNodes.length),
@@ -150,28 +155,31 @@ function gatherHints(
   };
 }
 
-function findComponents(graph: Graph): string[][] {
-  const seen = new Set<string>();
-  const comps: string[][] = [];
-  for (const start of graph.nodes()) {
-    if (seen.has(start)) continue;
-    const queue: string[] = [start];
-    let head = 0;
-    seen.add(start);
-    const comp: string[] = [];
-    while (head < queue.length) {
-      const id = queue[head++];
-      comp.push(id);
-      graph.forEachNeighbor(id, (nbr) => {
-        if (!seen.has(nbr)) {
-          seen.add(nbr);
-          queue.push(nbr);
-        }
-      });
+/**
+ * Partition the graph into clusters by running Louvain community detection.
+ * Isolated nodes and nodes in empty communities are each wrapped in a
+ * one-node cluster so they still get laid out.
+ */
+function findClusters(graph: Graph, resolution: number): string[][] {
+  if (graph.order === 0) return [];
+  const assignment: Record<string, number> =
+    graph.size > 0
+      ? louvain(graph, { getEdgeWeight: "weight", resolution })
+      : {};
+
+  const byCommunity = new Map<number, string[]>();
+  let nextSingletonId = 1_000_000_000;
+  for (const id of graph.nodes()) {
+    const raw = assignment[id];
+    const community = Number.isFinite(raw) ? raw : nextSingletonId++;
+    let bucket = byCommunity.get(community);
+    if (!bucket) {
+      bucket = [];
+      byCommunity.set(community, bucket);
     }
-    comps.push(comp);
+    bucket.push(id);
   }
-  return comps;
+  return [...byCommunity.values()];
 }
 
 function layoutComponent(
