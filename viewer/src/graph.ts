@@ -17,6 +17,12 @@ const BIN_MIN_RADIUS_FRAC = 0.12;
 const BIN_MAX_RADIUS_FRAC = 0.38;
 const GENOME_RADIUS_FRAC = 0.32;
 
+// Edge sizes are also in graph coordinates under itemSizesReference =
+// "positions". Keep them a small fraction of pitch so lines render as a
+// hairline regardless of zoom.
+const EDGE_MIN_WIDTH_FRAC = 0.012;
+const EDGE_MAX_WIDTH_FRAC = 0.035;
+
 export interface BuildOptions {
   onProgress?: (stage: string, fraction: number) => void;
 }
@@ -51,7 +57,9 @@ export function buildGraph(
     if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) continue;
     if (graph.hasEdge(e.source, e.target)) continue;
     graph.addEdge(e.source, e.target, {
-      size: 0.4 + e.weight * 1.6,
+      // Final width gets scaled by pitch once the layout runs below; store
+      // the unitless weight here and let the scale pass resolve it.
+      size: 1,
       color: "rgba(120, 140, 180, 0.25)",
       weight: e.weight,
     });
@@ -72,6 +80,17 @@ export function buildGraph(
   for (const n of data.nodes) {
     graph.setNodeAttribute(n.id, "size", defaultSize(n, pitch));
   }
+  graph.forEachEdge((id, attrs) => {
+    const w = Number(attrs.weight);
+    const t = Number.isFinite(w) ? Math.max(0, Math.min(1, w)) : 0.5;
+    graph.setEdgeAttribute(
+      id,
+      "size",
+      pitch *
+        (EDGE_MIN_WIDTH_FRAC +
+          t * (EDGE_MAX_WIDTH_FRAC - EDGE_MIN_WIDTH_FRAC)),
+    );
+  });
 
   return { graph, binIds, genomeIds, pitch };
 }

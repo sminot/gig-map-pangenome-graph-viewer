@@ -68,9 +68,9 @@ export function exportSVG(
       y: graph.getNodeAttribute(target, "y"),
     });
     const color = attrs.color ?? "rgba(120,140,180,0.25)";
-    const w = attrs.size ?? 0.5;
+    const w = Math.max(0.25, Number(attrs.size ?? 0.5) * sizeRatio);
     parts.push(
-      `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="${escapeAttr(color)}" stroke-width="${w}"/>`,
+      `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="${escapeAttr(color)}" stroke-width="${w.toFixed(2)}"/>`,
     );
   });
   parts.push(`</g>`);
