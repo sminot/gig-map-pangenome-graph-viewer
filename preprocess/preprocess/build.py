@@ -32,7 +32,7 @@ class Graph:
     genome_attr_cols: list[str]
 
 
-def build_graph(tables: GigMapTables, min_prop_detected: float = 0.5) -> Graph:
+def build_graph(tables: GigMapTables, min_prop_detected: float = 0.9) -> Graph:
     """Turn gig-map CSVs into a bipartite graph.
 
     Edges are drawn for (bin, genome) pairs where prop_genes_detected >= min_prop_detected.

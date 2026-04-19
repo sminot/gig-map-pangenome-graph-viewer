@@ -33,8 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--min-prop-detected",
         type=float,
-        default=0.5,
-        help="Minimum prop_genes_detected for an edge to be kept (default: 0.5).",
+        default=0.9,
+        help="Minimum prop_genes_detected for an edge to be kept (default: 0.9).",
     )
     parser.add_argument(
         "--title",
