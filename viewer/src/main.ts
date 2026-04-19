@@ -69,10 +69,17 @@ function writeParams(params: AppParams): string {
   return qs ? `?${qs}` : "";
 }
 
-function encodeFilter(filter: FilterState | null): string {
-  if (!filter || filter.ids.length === 0) return "";
-  const payload = JSON.stringify({ m: filter.mode, i: filter.ids });
-  return `#f=${compressToEncodedURIComponent(payload)}`;
+function encodeHash(filter: FilterState | null, pinned: Set<string>): string {
+  const parts: string[] = [];
+  if (filter && filter.ids.length > 0) {
+    const payload = JSON.stringify({ m: filter.mode, i: filter.ids });
+    parts.push(`f=${compressToEncodedURIComponent(payload)}`);
+  }
+  if (pinned.size > 0) {
+    const payload = JSON.stringify([...pinned]);
+    parts.push(`p=${compressToEncodedURIComponent(payload)}`);
+  }
+  return parts.length > 0 ? `#${parts.join("&")}` : "";
 }
 
 function decodeFilter(hash: string): FilterState | null {
@@ -91,12 +98,27 @@ function decodeFilter(hash: string): FilterState | null {
   }
 }
 
+function decodePinned(hash: string): Set<string> {
+  const match = /[#&]p=([^&]+)/.exec(hash);
+  if (!match) return new Set();
+  try {
+    const raw = decompressFromEncodedURIComponent(match[1]);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.map((v) => String(v)));
+  } catch {
+    return new Set();
+  }
+}
+
 function buildShareUrls(
   params: AppParams,
   filter: FilterState | null,
+  pinned: Set<string>,
 ): { share: string; embed: string } {
   const origin = `${window.location.origin}${window.location.pathname}`;
-  const hash = encodeFilter(filter);
+  const hash = encodeHash(filter, pinned);
   const share = `${origin}${writeParams({ ...params, embed: false })}${hash}`;
   const embedUrl = `${origin}${writeParams({ ...params, embed: true })}${hash}`;
   const iframe = `<iframe src="${embedUrl}" style="width:100%;height:600px;border:0" loading="lazy"></iframe>`;
@@ -136,6 +158,9 @@ async function main() {
   const controlsToggleBtn = document.getElementById("controls-toggle") as HTMLButtonElement;
   const edgesAlwaysOnInput = document.getElementById("edges-always-on") as HTMLInputElement;
   const edgesOpacityInput = document.getElementById("edges-opacity") as HTMLInputElement;
+  const pinnedSection = document.getElementById("pinned-section") as HTMLElement;
+  const pinnedStatus = document.getElementById("pinned-status") as HTMLParagraphElement;
+  const pinnedClearBtn = document.getElementById("pinned-clear") as HTMLButtonElement;
 
   if (params.data) dataUrlInput.value = params.data;
   if (params.binPalette) binPaletteSel.value = params.binPalette;
@@ -149,6 +174,7 @@ async function main() {
   let detachSearch: (() => void) | null = null;
   let interactions: InteractionHandle | null = null;
   let filter: FilterState | null = decodeFilter(window.location.hash);
+  let pinned: Set<string> = decodePinned(window.location.hash);
   let pendingSelection: string[] = [];
 
   const state: EncodingState = {
@@ -170,15 +196,24 @@ async function main() {
       embed: false,
     };
     const qs = writeParams(p);
-    const hash = encodeFilter(filter);
+    const hash = encodeHash(filter, pinned);
     window.history.replaceState(
       null,
       "",
       `${window.location.pathname}${qs}${hash}`,
     );
-    const urls = buildShareUrls(p, filter);
+    const urls = buildShareUrls(p, filter, pinned);
     shareUrlEl.value = urls.share;
     embedSnippetEl.value = urls.embed;
+  };
+
+  const renderPinnedUi = () => {
+    if (pinned.size === 0) {
+      pinnedSection.classList.add("hidden");
+      return;
+    }
+    pinnedSection.classList.remove("hidden");
+    pinnedStatus.textContent = `${pinned.size} node${pinned.size === 1 ? "" : "s"} pinned.`;
   };
 
   const renderFilterUi = (visible: number, total: number) => {
@@ -284,6 +319,16 @@ async function main() {
       edgesAlwaysOn: edgesAlwaysOnInput.checked,
       edgeOpacity: Number(edgesOpacityInput.value) / 100,
     });
+    // Drop any pinned ids that aren't in this dataset, then push the survivors
+    // into the handle. Store the set back so the URL reflects reality.
+    const known = new Set(graph.nodes());
+    pinned = new Set([...pinned].filter((id) => known.has(id)));
+    interactions.setPinned(pinned);
+    interactions.onPinnedChange((ids) => {
+      pinned = ids;
+      renderPinnedUi();
+      syncUrl();
+    });
     detachPhysics = attachDragPhysics(graph, sigma);
     detachSearch = attachSearch(searchInput, graph, (matched) =>
       interactions?.setSearch(matched),
@@ -304,6 +349,7 @@ async function main() {
     applyHeader(data.info);
     refresh();
     applyCurrentFilter();
+    renderPinnedUi();
   };
 
   const initialUrl = params.data ?? DEFAULT_DATA_URL;
@@ -363,6 +409,10 @@ async function main() {
   filterClearBtn.addEventListener("click", () => {
     filter = null;
     applyCurrentFilter();
+  });
+
+  pinnedClearBtn.addEventListener("click", () => {
+    interactions?.clearPinned();
   });
 
   document.addEventListener("keydown", (ev) => {
