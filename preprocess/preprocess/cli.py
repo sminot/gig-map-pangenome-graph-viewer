@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from .build import build_graph
-from .layout import compute_layout
 from .read import read_gigmap
 from .write import write_graph
 
@@ -34,18 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--min-prop-detected",
         type=float,
-        default=0.5,
-        help="Minimum prop_genes_detected for an edge to be kept (default: 0.5).",
-    )
-    parser.add_argument(
-        "--layout",
-        default="co-embed",
-        choices=["co-embed", "radial-spectral", "drl", "fr", "kk"],
-        help=(
-            "Layout algorithm for precomputed node positions "
-            "(default: co-embed — SVD + t-SNE joint embedding of bins and "
-            "genomes, so similarity groups are visible as 2D clusters)."
-        ),
+        default=0.9,
+        help="Minimum prop_genes_detected for an edge to be kept (default: 0.9).",
     )
     parser.add_argument(
         "--title",
@@ -61,10 +50,8 @@ def main(argv: list[str] | None = None) -> int:
 
     tables = read_gigmap(args.input_dir)
     graph = build_graph(tables, min_prop_detected=args.min_prop_detected)
-    layout = compute_layout(graph, algorithm=args.layout)
     write_graph(
         graph,
-        layout,
         args.out,
         title=args.title,
         description=args.description,

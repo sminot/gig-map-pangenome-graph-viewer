@@ -20,6 +20,7 @@ import { attachSearch } from "./search";
 import { exportPNG, exportSVG } from "./export";
 import { attachLasso, pointInPolygon } from "./lasso";
 import { applyFilter, FilterState } from "./filter";
+import { attachInteractions, InteractionHandle } from "./interactions";
 
 const DEFAULT_DATA_URL = "./graph";
 
@@ -68,10 +69,17 @@ function writeParams(params: AppParams): string {
   return qs ? `?${qs}` : "";
 }
 
-function encodeFilter(filter: FilterState | null): string {
-  if (!filter || filter.ids.length === 0) return "";
-  const payload = JSON.stringify({ m: filter.mode, i: filter.ids });
-  return `#f=${compressToEncodedURIComponent(payload)}`;
+function encodeHash(filter: FilterState | null, pinned: Set<string>): string {
+  const parts: string[] = [];
+  if (filter && filter.ids.length > 0) {
+    const payload = JSON.stringify({ m: filter.mode, i: filter.ids });
+    parts.push(`f=${compressToEncodedURIComponent(payload)}`);
+  }
+  if (pinned.size > 0) {
+    const payload = JSON.stringify([...pinned]);
+    parts.push(`p=${compressToEncodedURIComponent(payload)}`);
+  }
+  return parts.length > 0 ? `#${parts.join("&")}` : "";
 }
 
 function decodeFilter(hash: string): FilterState | null {
@@ -90,12 +98,27 @@ function decodeFilter(hash: string): FilterState | null {
   }
 }
 
+function decodePinned(hash: string): Set<string> {
+  const match = /[#&]p=([^&]+)/.exec(hash);
+  if (!match) return new Set();
+  try {
+    const raw = decompressFromEncodedURIComponent(match[1]);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.map((v) => String(v)));
+  } catch {
+    return new Set();
+  }
+}
+
 function buildShareUrls(
   params: AppParams,
   filter: FilterState | null,
+  pinned: Set<string>,
 ): { share: string; embed: string } {
   const origin = `${window.location.origin}${window.location.pathname}`;
-  const hash = encodeFilter(filter);
+  const hash = encodeHash(filter, pinned);
   const share = `${origin}${writeParams({ ...params, embed: false })}${hash}`;
   const embedUrl = `${origin}${writeParams({ ...params, embed: true })}${hash}`;
   const iframe = `<iframe src="${embedUrl}" style="width:100%;height:600px;border:0" loading="lazy"></iframe>`;
@@ -132,6 +155,12 @@ async function main() {
   const selectionKeepBtn = document.getElementById("selection-keep") as HTMLButtonElement;
   const selectionHideBtn = document.getElementById("selection-hide") as HTMLButtonElement;
   const selectionCancelBtn = document.getElementById("selection-cancel") as HTMLButtonElement;
+  const controlsToggleBtn = document.getElementById("controls-toggle") as HTMLButtonElement;
+  const edgesAlwaysOnInput = document.getElementById("edges-always-on") as HTMLInputElement;
+  const edgesOpacityInput = document.getElementById("edges-opacity") as HTMLInputElement;
+  const pinnedSection = document.getElementById("pinned-section") as HTMLElement;
+  const pinnedStatus = document.getElementById("pinned-status") as HTMLParagraphElement;
+  const pinnedClearBtn = document.getElementById("pinned-clear") as HTMLButtonElement;
 
   if (params.data) dataUrlInput.value = params.data;
   if (params.binPalette) binPaletteSel.value = params.binPalette;
@@ -142,7 +171,12 @@ async function main() {
   let sigma!: Sigma;
   let detachPhysics: (() => void) | null = null;
   let detachLasso: (() => void) | null = null;
+  let detachSearch: (() => void) | null = null;
+  let detachTooltip: (() => void) | null = null;
+  let interactions: InteractionHandle | null = null;
+  let loadToken = 0;
   let filter: FilterState | null = decodeFilter(window.location.hash);
+  let pinned: Set<string> = decodePinned(window.location.hash);
   let pendingSelection: string[] = [];
 
   const state: EncodingState = {
@@ -164,15 +198,24 @@ async function main() {
       embed: false,
     };
     const qs = writeParams(p);
-    const hash = encodeFilter(filter);
+    const hash = encodeHash(filter, pinned);
     window.history.replaceState(
       null,
       "",
       `${window.location.pathname}${qs}${hash}`,
     );
-    const urls = buildShareUrls(p, filter);
+    const urls = buildShareUrls(p, filter, pinned);
     shareUrlEl.value = urls.share;
     embedSnippetEl.value = urls.embed;
+  };
+
+  const renderPinnedUi = () => {
+    if (pinned.size === 0) {
+      pinnedSection.classList.add("hidden");
+      return;
+    }
+    pinnedSection.classList.remove("hidden");
+    pinnedStatus.textContent = `${pinned.size} node${pinned.size === 1 ? "" : "s"} pinned.`;
   };
 
   const renderFilterUi = (visible: number, total: number) => {
@@ -255,6 +298,18 @@ async function main() {
       detachLasso();
       detachLasso = null;
     }
+    if (detachSearch) {
+      detachSearch();
+      detachSearch = null;
+    }
+    if (detachTooltip) {
+      detachTooltip();
+      detachTooltip = null;
+    }
+    if (interactions) {
+      interactions.detach();
+      interactions = null;
+    }
     if (sigma) sigma.kill();
     container.innerHTML = "";
     container.appendChild(dropOverlay);
@@ -265,9 +320,25 @@ async function main() {
     const nodesById = new Map<string, NodeRow>(data.nodes.map((n) => [n.id, n]));
 
     sigma = createSigma(graph, container);
-    attachTooltip(sigma, graph, nodesById);
+    detachTooltip = attachTooltip(sigma, graph, nodesById);
+    interactions = attachInteractions(sigma, graph, {
+      edgesAlwaysOn: edgesAlwaysOnInput.checked,
+      edgeOpacity: Number(edgesOpacityInput.value) / 100,
+    });
+    // Drop any pinned ids that aren't in this dataset, then push the survivors
+    // into the handle. Store the set back so the URL reflects reality.
+    const known = new Set(graph.nodes());
+    pinned = new Set([...pinned].filter((id) => known.has(id)));
+    interactions.setPinned(pinned);
+    interactions.onPinnedChange((ids) => {
+      pinned = ids;
+      renderPinnedUi();
+      syncUrl();
+    });
     detachPhysics = attachDragPhysics(graph, sigma);
-    attachSearch(searchInput, sigma, graph);
+    detachSearch = attachSearch(searchInput, graph, (matched) =>
+      interactions?.setSearch(matched),
+    );
     detachLasso = attachLasso(sigma, container, onLasso);
 
     populateAttributeSelectors(data, binColorSel, genomeColorSel);
@@ -284,23 +355,36 @@ async function main() {
     applyHeader(data.info);
     refresh();
     applyCurrentFilter();
+    renderPinnedUi();
   };
 
   const initialUrl = params.data ?? DEFAULT_DATA_URL;
   status.textContent = `Loading ${initialUrl}…`;
-  installGraph(await loadGraph(initialUrl), initialUrl);
+  const initialToken = ++loadToken;
+  const initialData = await loadGraph(initialUrl);
+  if (initialToken === loadToken) {
+    installGraph(initialData, initialUrl);
+  }
 
   binColorSel.addEventListener("change", refresh);
   genomeColorSel.addEventListener("change", refresh);
   binPaletteSel.addEventListener("change", refresh);
   binSizeScaleSel.addEventListener("change", refresh);
 
+  // loadToken tags the latest requested load; any callback whose token is no
+  // longer current (because the user triggered another load meanwhile) bails
+  // out before mutating the graph. Prevents the double-click / drop-while-
+  // loading race where the older fetch can win against the newer one.
   const reload = async () => {
     const url = dataUrlInput.value.trim() || DEFAULT_DATA_URL;
+    const myToken = ++loadToken;
     status.textContent = `Loading ${url}…`;
     try {
-      installGraph(await loadGraph(url), url);
+      const data = await loadGraph(url);
+      if (myToken !== loadToken) return;
+      installGraph(data, url);
     } catch (err) {
+      if (myToken !== loadToken) return;
       status.textContent = `Error loading ${url}: ${err instanceof Error ? err.message : String(err)}`;
       console.error(err);
     }
@@ -315,6 +399,7 @@ async function main() {
     container,
     dropOverlay,
     (next, src) => {
+      loadToken++;
       filter = null;
       installGraph(next, src);
     },
@@ -345,8 +430,23 @@ async function main() {
     applyCurrentFilter();
   });
 
+  pinnedClearBtn.addEventListener("click", () => {
+    interactions?.clearPinned();
+  });
+
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") hideSelectionActions();
+  });
+
+  edgesAlwaysOnInput.addEventListener("change", () => {
+    interactions?.setEdgesAlwaysOn(edgesAlwaysOnInput.checked);
+  });
+  edgesOpacityInput.addEventListener("input", () => {
+    interactions?.setEdgeOpacity(Number(edgesOpacityInput.value) / 100);
+  });
+
+  controlsToggleBtn.addEventListener("click", () => {
+    document.body.classList.toggle("menu-collapsed");
   });
 }
 

@@ -1,12 +1,15 @@
 import type Graph from "graphology";
 import type { GraphData, MetaRow } from "./loader";
 import { Palette, categoricalColor, sampleSequential } from "./palettes";
+import { BIN_RADIUS_FRAC_RANGE, GENOME_RADIUS_FRAC_VALUE } from "./graph";
 
 const BIN_FALLBACK = "#58a6ff";
 const GENOME_FALLBACK = "#f0883e";
-const GENOME_SIZE = 9;
-const BIN_SIZE_MIN = 4;
-const BIN_SIZE_MAX = 22;
+
+// Legend-only: pixel diameters for the DOM swatches, independent of the
+// graph-coordinate sizes used by Sigma.
+const LEGEND_DOT_MIN_PX = 6;
+const LEGEND_DOT_MAX_PX = 26;
 
 export type SizeScale = "linear" | "sqrt" | "log";
 
@@ -58,10 +61,17 @@ export function applyEncoding(
     GENOME_FALLBACK,
   );
 
-  legend.sizeLegend = applyBinSizes(graph, binNodes, state.binSizeScale);
-  for (const n of genomeNodes) graph.setNodeAttribute(n.id, "size", GENOME_SIZE);
+  const pitch = readPitch(graph);
+  legend.sizeLegend = applyBinSizes(graph, binNodes, state.binSizeScale, pitch);
+  const genomeSize = pitch * GENOME_RADIUS_FRAC_VALUE;
+  for (const n of genomeNodes) graph.setNodeAttribute(n.id, "size", genomeSize);
 
   return legend;
+}
+
+function readPitch(graph: Graph): number {
+  const raw = Number(graph.getAttribute("hexPitch"));
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
 function metaFor(
@@ -143,6 +153,7 @@ function applyBinSizes(
   graph: Graph,
   nodes: { id: string; attrs: Record<string, unknown> }[],
   scale: SizeScale,
+  pitch: number,
 ): SizeLegend | null {
   const values = nodes
     .map((n) => Math.max(1, Number(n.attrs.n_genes ?? 1)))
@@ -156,20 +167,29 @@ function applyBinSizes(
   const tMax = transform(max);
   const tSpan = tMax - tMin || 1;
 
-  const sizeFor = (v: number) =>
-    BIN_SIZE_MIN +
-    ((transform(Math.max(1, v)) - tMin) / tSpan) * (BIN_SIZE_MAX - BIN_SIZE_MIN);
+  const normalizedFor = (v: number) =>
+    (transform(Math.max(1, v)) - tMin) / tSpan;
+
+  const graphSizeFor = (v: number) =>
+    pitch *
+    (BIN_RADIUS_FRAC_RANGE.min +
+      normalizedFor(v) * (BIN_RADIUS_FRAC_RANGE.max - BIN_RADIUS_FRAC_RANGE.min));
+
+  const legendPixelFor = (v: number) =>
+    (LEGEND_DOT_MIN_PX +
+      normalizedFor(v) * (LEGEND_DOT_MAX_PX - LEGEND_DOT_MIN_PX)) /
+    2;
 
   for (const n of nodes) {
     const raw = Math.max(1, Number(n.attrs.n_genes ?? 1));
-    graph.setNodeAttribute(n.id, "size", sizeFor(raw));
+    graph.setNodeAttribute(n.id, "size", graphSizeFor(raw));
   }
 
   const tickValues = pickTicks(min, max, scale);
   return {
     scale,
     column: "n_genes",
-    ticks: tickValues.map((value) => ({ value, size: sizeFor(value) })),
+    ticks: tickValues.map((value) => ({ value, size: legendPixelFor(value) })),
   };
 }
 
