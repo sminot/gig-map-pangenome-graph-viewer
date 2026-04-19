@@ -20,6 +20,7 @@ import { attachSearch } from "./search";
 import { exportPNG, exportSVG } from "./export";
 import { attachLasso, pointInPolygon } from "./lasso";
 import { applyFilter, FilterState } from "./filter";
+import { attachInteractions, InteractionHandle } from "./interactions";
 
 const DEFAULT_DATA_URL = "./graph";
 
@@ -132,6 +133,9 @@ async function main() {
   const selectionKeepBtn = document.getElementById("selection-keep") as HTMLButtonElement;
   const selectionHideBtn = document.getElementById("selection-hide") as HTMLButtonElement;
   const selectionCancelBtn = document.getElementById("selection-cancel") as HTMLButtonElement;
+  const controlsToggleBtn = document.getElementById("controls-toggle") as HTMLButtonElement;
+  const edgesAlwaysOnInput = document.getElementById("edges-always-on") as HTMLInputElement;
+  const edgesOpacityInput = document.getElementById("edges-opacity") as HTMLInputElement;
 
   if (params.data) dataUrlInput.value = params.data;
   if (params.binPalette) binPaletteSel.value = params.binPalette;
@@ -142,6 +146,8 @@ async function main() {
   let sigma!: Sigma;
   let detachPhysics: (() => void) | null = null;
   let detachLasso: (() => void) | null = null;
+  let detachSearch: (() => void) | null = null;
+  let interactions: InteractionHandle | null = null;
   let filter: FilterState | null = decodeFilter(window.location.hash);
   let pendingSelection: string[] = [];
 
@@ -255,6 +261,14 @@ async function main() {
       detachLasso();
       detachLasso = null;
     }
+    if (detachSearch) {
+      detachSearch();
+      detachSearch = null;
+    }
+    if (interactions) {
+      interactions.detach();
+      interactions = null;
+    }
     if (sigma) sigma.kill();
     container.innerHTML = "";
     container.appendChild(dropOverlay);
@@ -266,8 +280,14 @@ async function main() {
 
     sigma = createSigma(graph, container);
     attachTooltip(sigma, graph, nodesById);
+    interactions = attachInteractions(sigma, graph, {
+      edgesAlwaysOn: edgesAlwaysOnInput.checked,
+      edgeOpacity: Number(edgesOpacityInput.value) / 100,
+    });
     detachPhysics = attachDragPhysics(graph, sigma);
-    attachSearch(searchInput, sigma, graph);
+    detachSearch = attachSearch(searchInput, graph, (matched) =>
+      interactions?.setSearch(matched),
+    );
     detachLasso = attachLasso(sigma, container, onLasso);
 
     populateAttributeSelectors(data, binColorSel, genomeColorSel);
@@ -347,6 +367,17 @@ async function main() {
 
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") hideSelectionActions();
+  });
+
+  edgesAlwaysOnInput.addEventListener("change", () => {
+    interactions?.setEdgesAlwaysOn(edgesAlwaysOnInput.checked);
+  });
+  edgesOpacityInput.addEventListener("input", () => {
+    interactions?.setEdgeOpacity(Number(edgesOpacityInput.value) / 100);
+  });
+
+  controlsToggleBtn.addEventListener("click", () => {
+    document.body.classList.toggle("menu-collapsed");
   });
 }
 

@@ -46,7 +46,8 @@ export function buildGraph(
       y: 0,
       size: 1,
       color: defaultColor(n),
-      type: n.kind === "genome" ? "ring" : "circle",
+      // Bins render as unfilled rings; genomes are solid-filled circles.
+      type: n.kind === "bin" ? "ring" : "circle",
       attrs: n.attrs,
     });
     if (n.kind === "bin") binIds.push(n.id);

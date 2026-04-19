@@ -3,9 +3,9 @@ import { createNodeBorderProgram } from "@sigma/node-border";
 import type Graph from "graphology";
 
 /**
- * Genome nodes render as unfilled "rings": a 2px outer band in the node's
+ * Bin nodes render as unfilled "rings": a 2px outer band in the node's
  * color, with the center filled in the canvas background so it reads as an
- * outline against edges. Bins keep the default solid-filled circle.
+ * outline against edges. Genomes keep the default solid-filled circle.
  */
 const RING_BACKGROUND = "#010409";
 const RING_PROGRAM = createNodeBorderProgram({
