@@ -4,15 +4,16 @@ import { TSNE } from "@keckelt/tsne";
 /**
  * Co-embed bins and genomes into 2D using the bipartite-aware distances:
  *
- *   bin <-> bin       : 1 - WeightedJaccard(genome -> edge_weight)
- *   genome <-> genome : 1 - WeightedJaccard(bin -> edge_weight)
+ *   bin <-> bin       : 1 - Jaccard(genomes containing each)        (unweighted)
+ *   genome <-> genome : 1 - sum(n_genes for shared bins)
+ *                            / sum(n_genes for the union of bins)
  *   bin <-> genome    : 0 if an edge exists, 1 otherwise
  *
- * Weighted Jaccard treats each edge weight as a "membership strength":
- *   numerator   = sum over shared neighbors of min(w_a, w_b)
- *   denominator = sum over the union of neighbors of max(w_a, w_b)
- * so high-weight overlap counts more than low-weight overlap, and unweighted
- * Jaccard is the special case of binary weights.
+ * Genome similarity is weighted by bin gene count: sharing a 100-gene bin
+ * makes two genomes much more similar than sharing a 5-gene bin. The two
+ * sums collapse to ordinary Jaccard if every bin has the same n_genes.
+ * Bin-bin distance stays unweighted because genomes don't have an analogous
+ * "size" attribute.
  *
  * t-SNE is then run on the resulting NxN distance matrix (Karpathy-style
  * O(N^2) per iteration). Ids are returned in the same order as the rows of
@@ -78,41 +79,40 @@ function computeDistanceMatrix(graph: Graph, ids: string[]): number[][] {
   const idx = new Map<string, number>();
   for (let i = 0; i < N; i++) idx.set(ids[i], i);
 
-  // Per-node neighbor table sorted by neighbor index, paired with the edge
-  // weight to that neighbor. Sorted parallel arrays let us do weighted
-  // Jaccard via a merge in O(|A| + |B|).
-  const neighborIdsSorted: Int32Array[] = new Array(N);
-  const neighborWeights: Float32Array[] = new Array(N);
-  const neighborWeightByIdx: Map<number, number>[] = new Array(N);
+  // Per-node "size" used to weight overlap. Bins contribute n_genes; genomes
+  // contribute 1, which makes bin-bin Jaccard collapse to the unweighted form
+  // (since each shared genome counts the same).
   const kinds: string[] = new Array(N);
-
+  const nodeWeight = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const id = ids[i];
-    kinds[i] = String(graph.getNodeAttribute(id, "kind") ?? "");
-    const pairs: [number, number][] = [];
-    graph.forEachNeighbor(id, (nbr) => {
-      const j = idx.get(nbr);
-      if (j === undefined) return;
-      const eid = graph.edge(id, nbr);
-      let w = 1;
-      if (eid !== undefined) {
-        const raw = Number(graph.getEdgeAttribute(eid, "weight"));
-        if (Number.isFinite(raw) && raw > 0) w = raw;
-      }
-      pairs.push([j, w]);
-    });
-    pairs.sort((a, b) => a[0] - b[0]);
-    const idsArr = new Int32Array(pairs.length);
-    const wArr = new Float32Array(pairs.length);
-    const map = new Map<number, number>();
-    for (let k = 0; k < pairs.length; k++) {
-      idsArr[k] = pairs[k][0];
-      wArr[k] = pairs[k][1];
-      map.set(pairs[k][0], pairs[k][1]);
+    const kind = String(graph.getNodeAttribute(id, "kind") ?? "");
+    kinds[i] = kind;
+    if (kind === "bin") {
+      const attrs = graph.getNodeAttribute(id, "attrs") as
+        | Record<string, unknown>
+        | undefined;
+      const raw = attrs ? Number(attrs.n_genes) : NaN;
+      nodeWeight[i] = Number.isFinite(raw) && raw > 0 ? raw : 1;
+    } else {
+      nodeWeight[i] = 1;
     }
-    neighborIdsSorted[i] = idsArr;
-    neighborWeights[i] = wArr;
-    neighborWeightByIdx[i] = map;
+  }
+
+  // Sorted neighbor-index arrays per node — that's all the per-node info the
+  // weighted-Jaccard merge below needs, since the per-shared-neighbor weight
+  // comes from the global nodeWeight table (the neighbor's own weight).
+  const neighborIdsSorted: Int32Array[] = new Array(N);
+  const neighborSet: Set<number>[] = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const indices: number[] = [];
+    graph.forEachNeighbor(ids[i], (nbr) => {
+      const j = idx.get(nbr);
+      if (j !== undefined) indices.push(j);
+    });
+    indices.sort((a, b) => a - b);
+    neighborIdsSorted[i] = Int32Array.from(indices);
+    neighborSet[i] = new Set(indices);
   }
 
   const D: number[][] = new Array(N);
@@ -121,14 +121,13 @@ function computeDistanceMatrix(graph: Graph, ids: string[]): number[][] {
   for (let i = 0; i < N; i++) {
     const ki = kinds[i];
     const ai = neighborIdsSorted[i];
-    const aw = neighborWeights[i];
-    const wi = neighborWeightByIdx[i];
+    const ni = neighborSet[i];
     for (let j = i + 1; j < N; j++) {
       let d: number;
       if (kinds[j] === ki) {
-        d = 1 - weightedJaccardSorted(ai, aw, neighborIdsSorted[j], neighborWeights[j]);
+        d = 1 - weightedJaccardByNeighborSize(ai, neighborIdsSorted[j], nodeWeight);
       } else {
-        d = wi.has(j) ? 0 : 1;
+        d = ni.has(j) ? 0 : 1;
       }
       D[i][j] = d;
       D[j][i] = d;
@@ -137,11 +136,16 @@ function computeDistanceMatrix(graph: Graph, ids: string[]): number[][] {
   return D;
 }
 
-function weightedJaccardSorted(
+/**
+ * Generalized Jaccard where each shared neighbor contributes its own weight
+ * (taken from `weight[k]` for neighbor index k). Equivalent to
+ *   sum_{k in A∩B} weight[k] / sum_{k in A∪B} weight[k]
+ * computed in O(|A| + |B|) by merging the two sorted neighbor lists.
+ */
+function weightedJaccardByNeighborSize(
   aIds: Int32Array,
-  aW: Float32Array,
   bIds: Int32Array,
-  bW: Float32Array,
+  weight: Float32Array,
 ): number {
   const an = aIds.length;
   const bn = bIds.length;
@@ -154,21 +158,20 @@ function weightedJaccardSorted(
     const av = aIds[i];
     const bv = bIds[j];
     if (av === bv) {
-      const wa = aW[i];
-      const wb = bW[j];
-      inter += wa < wb ? wa : wb;
-      uni += wa > wb ? wa : wb;
+      const w = weight[av];
+      inter += w;
+      uni += w;
       i++;
       j++;
     } else if (av < bv) {
-      uni += aW[i];
+      uni += weight[av];
       i++;
     } else {
-      uni += bW[j];
+      uni += weight[bv];
       j++;
     }
   }
-  while (i < an) uni += aW[i++];
-  while (j < bn) uni += bW[j++];
+  while (i < an) uni += weight[aIds[i++]];
+  while (j < bn) uni += weight[bIds[j++]];
   return uni === 0 ? 0 : inter / uni;
 }

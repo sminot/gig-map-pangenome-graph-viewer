@@ -258,11 +258,11 @@ Algorithm, Python-side sketch:
 
 1. **Distance matrix (`N × N`).** `N = n_bins + n_genomes`. Fill symmetrically:
 
-   - `bin ↔ bin`: `1 − Jaccard(genomes_containing_a, genomes_containing_b)`
-   - `genome ↔ genome`: `1 − Jaccard(bins_in_a, bins_in_b)`
+   - `bin ↔ bin`: `1 − Jaccard(genomes_containing_a, genomes_containing_b)` (unweighted)
+   - `genome ↔ genome`: `1 − Σ n_genes(b) for b in shared_bins / Σ n_genes(b) for b in union_of_bins` — i.e. weighted Jaccard with the shared-bin's gene count as the per-bin weight, so a 100-gene shared bin counts 20× more than a 5-gene shared bin
    - `bin ↔ genome`: `0` if an edge exists, `1` otherwise
 
-   For sparse bipartite graphs this is straightforward with two adjacency dicts of `set[int]`; the Jaccard loop is ~`O(N² · avg_deg)` but can be replaced by a sparse boolean matrix product if `N` gets large.
+   Implementation note: assign every node a `weight` (`n_genes` for bins, `1` for genomes); then the same `Σw / Σw` formula handles both same-kind cases — bin↔bin collapses to ordinary Jaccard because every genome contributes weight 1. For sparse bipartite graphs the loop is `O(N² · avg_deg)` and can be replaced by a sparse matrix product (`(W · M^T) / (1·M^T + M·1^T − W·M^T)` style) if `N` gets large.
 
 2. **t-SNE.** Feed the matrix to `sklearn.manifold.TSNE(metric="precomputed", init="random", perplexity=min(50, sqrt(N)))` to get `(N, 2)` coordinates. Seed via `random_state` if you want reproducibility across deploys.
 
